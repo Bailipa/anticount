@@ -10,7 +10,11 @@ import '../../providers/auth_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/transaction_provider.dart';
 import '../../services/widget_service.dart';
+import '../../utils/date_helpers.dart';
+import '../../utils/format.dart';
 import '../../widgets/animated_dialog.dart';
+import '../../widgets/empty_state.dart';
+import '../../widgets/period_switcher.dart';
 import '../../widgets/slide_transition_switcher.dart';
 import '../accounting/accounting_screen.dart';
 import 'bills_detail_screen.dart';
@@ -34,7 +38,7 @@ class _BillsScreenState extends State<BillsScreen> {
   DateTime _selectedMonth = DateTime(DateTime.now().year, DateTime.now().month, 1);
 
   /// 当前选中的周（用该周周一表示）
-  DateTime _selectedWeekStart = _mondayOf(DateTime.now());
+  DateTime _selectedWeekStart = mondayOf(DateTime.now());
 
   /// 周切换动画方向（true=向右滑动，false=向左滑动）
   bool _weekSlideRight = true;
@@ -56,11 +60,6 @@ class _BillsScreenState extends State<BillsScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadData());
   }
 
-  /// 计算指定日期所在周的周一（ISO 周一为一周开始）
-  static DateTime _mondayOf(DateTime date) {
-    return DateTime(date.year, date.month, date.day - (date.weekday - 1));
-  }
-
   /// 计算时间切换时的滑动方向
   ///
   /// 按自然时间顺序：向前（更新、增长）时视觉向左滑动；向后（更旧、减小）时视觉向右滑动。
@@ -69,14 +68,6 @@ class _BillsScreenState extends State<BillsScreen> {
   /// - `false`：向左滑动（旧内容从右侧退出，新内容从左侧进入）
   static bool _slideRightFor(DateTime previous, DateTime current) =>
       current.isBefore(previous);
-
-  /// 当前选中月的起始（1 号 0 点）
-  DateTime get _monthStart =>
-      DateTime(_selectedMonth.year, _selectedMonth.month, 1);
-
-  /// 当前选中月的结束（月末 23:59:59.999）
-  DateTime get _monthEnd =>
-      DateTime(_selectedMonth.year, _selectedMonth.month + 1, 0, 23, 59, 59, 999);
 
   /// 当前选中周的结束（周日 23:59:59.999）
   DateTime get _weekEnd =>
@@ -185,9 +176,9 @@ class _BillsScreenState extends State<BillsScreen> {
   DateTime _weekStartForMonth(DateTime month) {
     final now = DateTime.now();
     if (month.year == now.year && month.month == now.month) {
-      return _mondayOf(now);
+      return mondayOf(now);
     }
-    return _mondayOf(DateTime(month.year, month.month, 1));
+    return mondayOf(DateTime(month.year, month.month, 1));
   }
 
   /// 上一月
@@ -293,8 +284,8 @@ class _BillsScreenState extends State<BillsScreen> {
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => BillsDetailScreen(
         title: '${_selectedMonth.month}月收入',
-        start: _monthStart,
-        end: _monthEnd,
+        start: monthStart(_selectedMonth),
+        end: monthEnd(_selectedMonth),
         type: TransactionType.income,
       ),
     ));
@@ -305,8 +296,8 @@ class _BillsScreenState extends State<BillsScreen> {
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => BillsDetailScreen(
         title: '${_selectedMonth.month}月支出',
-        start: _monthStart,
-        end: _monthEnd,
+        start: monthStart(_selectedMonth),
+        end: monthEnd(_selectedMonth),
         type: TransactionType.expense,
       ),
     ));
@@ -376,7 +367,7 @@ class _BillsScreenState extends State<BillsScreen> {
   /// 左右按钮 + 可点击的月份文本，标题变化时带有滑动动画，不可切换时按钮变灰。
   Widget _buildMonthSwitcher(BuildContext context) {
     final title = '${_selectedMonth.year}年${_selectedMonth.month}月';
-    return _PeriodSwitcher(
+    return PeriodSwitcher(
       title: title,
       titleKey: ValueKey<String>(title),
       onPrev: _prevMonth,
@@ -387,17 +378,13 @@ class _BillsScreenState extends State<BillsScreen> {
     );
   }
 
-  /// 当月天数（用于计算日均）
-  int get _monthDays =>
-      DateTime(_selectedMonth.year, _selectedMonth.month + 1, 0).day;
-
   /// 月收入 / 月支出卡片（可点击跳转）
   ///
   /// 合并为一个圆角矩形，分左右两半，下方显示结余和日均。
   Widget _buildMonthSummary(BuildContext context, String currency) {
     final balance = _monthIncome - _monthExpense;
-    final dayIncome = _monthIncome / _monthDays;
-    final dayExpense = _monthExpense / _monthDays;
+    final dayIncome = _monthIncome / monthDays(_selectedMonth);
+    final dayExpense = _monthExpense / monthDays(_selectedMonth);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Card(
@@ -473,7 +460,7 @@ class _BillsScreenState extends State<BillsScreen> {
     final weekEnd = _selectedWeekStart.add(const Duration(days: 6));
     final title =
         '${DateFormat('MM-dd').format(_selectedWeekStart)} ~ ${DateFormat('MM-dd').format(weekEnd)}';
-    return _PeriodSwitcher(
+    return PeriodSwitcher(
       title: title,
       titleKey: ValueKey<String>(title),
       onPrev: _prevWeek,
@@ -494,17 +481,9 @@ class _BillsScreenState extends State<BillsScreen> {
   /// 周切换器标题也使用同样的滑动动画。
   Widget _buildDailyList(BuildContext context, String currency) {
     if (_dailyGroups.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.all(32),
-        child: Center(
-          child: Column(
-            children: [
-              Icon(Icons.event_busy, size: 48, color: Colors.grey),
-              SizedBox(height: 8),
-              Text('本周暂无账单记录', style: TextStyle(color: Colors.grey)),
-            ],
-          ),
-        ),
+      return const EmptyState(
+        icon: Icons.event_busy,
+        title: '本周暂无账单记录',
       );
     }
     // SlideTransitionSwitcher：切换周时列表整体滑动 + 淡入淡出
@@ -529,10 +508,13 @@ class _BillsScreenState extends State<BillsScreen> {
 
   /// 确认删除
   Future<void> _confirmDelete(BuildContext context, Transaction tx) async {
-    final ok = await showAnimatedDialog<bool>(
+    final ok = await showConfirmDialog(
       context: context,
-      barrierLabel: '删除确认',
-      builder: (_) => _DeleteConfirmDialog(theme: Theme.of(context)),
+      title: '删除记账',
+      content: '确认删除该条记录？此操作不可恢复。',
+      confirmText: '删除',
+      danger: true,
+      icon: Icons.delete_outline,
     );
     if (ok == true && context.mounted) {
       final user = context.read<AuthProvider>().user;
@@ -542,137 +524,6 @@ class _BillsScreenState extends State<BillsScreen> {
         await _loadData();
       }
     }
-  }
-}
-
-/// 可复用的周期切换器（月份/周等）
-///
-/// 左右导航按钮 + 可点击标题，标题变化时通过 [SlideTransitionSwitcher] 播放滑动动画。
-/// [slideRight] 控制标题切换的视觉方向，语义与 [SlideTransitionSwitcher.slideRight] 一致。
-class _PeriodSwitcher extends StatelessWidget {
-  const _PeriodSwitcher({
-    required this.title,
-    required this.titleKey,
-    required this.onPrev,
-    required this.onNext,
-    this.onTitleTap,
-    required this.slideRight,
-    this.canGoNext = true,
-    this.backgroundColor,
-    this.titleStyle,
-    this.containerPadding,
-    this.outerPadding,
-    this.borderRadius,
-  });
-
-  /// 当前标题文本
-  final String title;
-
-  /// 用于触发动画的 key，通常基于时间生成
-  final Key titleKey;
-
-  /// 点击左按钮
-  final VoidCallback onPrev;
-
-  /// 点击右按钮
-  final VoidCallback onNext;
-
-  /// 点击标题（可选）
-  final VoidCallback? onTitleTap;
-
-  /// 标题切换方向：true=向右滑动，false=向左滑动
-  final bool slideRight;
-
-  /// 右按钮是否可用
-  final bool canGoNext;
-
-  /// 标题容器背景色
-  final Color? backgroundColor;
-
-  /// 标题文本样式
-  final TextStyle? titleStyle;
-
-  /// 标题容器内边距
-  final EdgeInsetsGeometry? containerPadding;
-
-  /// 组件整体外边距
-  final EdgeInsetsGeometry? outerPadding;
-
-  /// 标题容器圆角
-  final double? borderRadius;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: outerPadding ??
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          _NavButton(
-            icon: Icons.chevron_left,
-            onPressed: onPrev,
-            enabled: true,
-          ),
-          GestureDetector(
-            onTap: onTitleTap,
-            child: Container(
-              padding: containerPadding ??
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                borderRadius:
-                    BorderRadius.circular(borderRadius ?? 20),
-                color: backgroundColor ?? colorScheme.primaryContainer,
-              ),
-              child: SlideTransitionSwitcher(
-                slideRight: slideRight,
-                child: Text(
-                  key: titleKey,
-                  title,
-                  style: titleStyle ??
-                      TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: colorScheme.onPrimaryContainer,
-                      ),
-                ),
-              ),
-            ),
-          ),
-          _NavButton(
-            icon: Icons.chevron_right,
-            onPressed: onNext,
-            enabled: canGoNext,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 导航按钮（左右切换）
-///
-/// 不可切换时 [enabled] 为 false，按钮变灰且不响应点击。
-class _NavButton extends StatelessWidget {
-  const _NavButton({
-    required this.icon,
-    required this.onPressed,
-    required this.enabled,
-  });
-
-  final IconData icon;
-  final VoidCallback onPressed;
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      icon: Icon(icon),
-      onPressed: enabled ? onPressed : null,
-      color: Theme.of(context).colorScheme.primary,
-      disabledColor: Colors.grey.shade400,
-    );
   }
 }
 
@@ -705,7 +556,7 @@ class _SummaryHalf extends StatelessWidget {
               style: const TextStyle(color: Colors.grey, fontSize: 12)),
           const SizedBox(height: 4),
           Text(
-            '$currency${amount.toStringAsFixed(2)}',
+            formatMoney(amount, currency),
             style: TextStyle(
               color: color,
               fontSize: 18,
@@ -753,7 +604,7 @@ class _InfoItem extends StatelessWidget {
         Text(label, style: const TextStyle(color: Colors.grey, fontSize: 11)),
         const SizedBox(height: 2),
         Text(
-          '$currency${amount.toStringAsFixed(2)}',
+          formatMoney(amount, currency),
           style: TextStyle(
             color: color,
             fontSize: 13,
@@ -838,13 +689,13 @@ class _DailyCardState extends State<_DailyCard>
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           if (income > 0)
-                            Text('收入 ${widget.currency}${income.toStringAsFixed(2)}',
+                            Text(formatMoney(income, widget.currency, prefix: '收入 '),
                                 style: const TextStyle(
                                     color: Colors.green, fontSize: 12)),
                           if (income > 0 && expense > 0)
                             const SizedBox(width: 8),
                           if (expense > 0)
-                            Text('支出 ${widget.currency}${expense.toStringAsFixed(2)}',
+                            Text(formatMoney(expense, widget.currency, prefix: '支出 '),
                                 style: const TextStyle(
                                     color: Colors.red, fontSize: 12)),
                         ],
@@ -926,7 +777,7 @@ class _TransactionTile extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            '${isIncome ? '+' : '-'}$currency${tx.amount.toStringAsFixed(2)}',
+            formatMoney(tx.amount, currency, sign: isIncome ? '+' : '-'),
             style: TextStyle(
               color: isIncome ? Colors.green : Colors.red,
               fontWeight: FontWeight.w600,
@@ -1020,84 +871,6 @@ class _MonthPickerDialogState extends State<_MonthPickerDialog> {
           child: const Text('确定'),
         ),
       ],
-    );
-  }
-}
-
-/// 删除确认对话框
-class _DeleteConfirmDialog extends StatelessWidget {
-  const _DeleteConfirmDialog({required this.theme});
-
-  final ThemeData theme;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: Container(
-        width: double.infinity,
-        margin: const EdgeInsets.symmetric(horizontal: 28),
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Icon(Icons.delete_outline, size: 40, color: theme.colorScheme.error),
-            const SizedBox(height: 12),
-            Text(
-              '删除记账',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '确认删除该条记录？此操作不可恢复。',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13,
-                color: theme.colorScheme.onSurface.withAlpha(160),
-              ),
-            ),
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.of(context).pop(false),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size.fromHeight(44),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text('取消'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton(
-                    onPressed: () => Navigator.of(context).pop(true),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: theme.colorScheme.error,
-                      minimumSize: const Size.fromHeight(44),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text('删除'),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

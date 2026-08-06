@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/transaction.dart';
@@ -11,7 +10,11 @@ import '../../providers/auth_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/transaction_provider.dart';
 import '../../services/ai_service.dart';
+import '../../utils/ai_result_saver.dart';
+import '../../utils/duplicate_check.dart';
+import '../../utils/image_picker_helper.dart';
 import '../../widgets/animated_dialog.dart';
+import '../../widgets/empty_state.dart';
 import 'ai_error_dialog.dart';
 import 'auto_save_confirm_dialog.dart';
 
@@ -58,21 +61,13 @@ class _AiChatPanelState extends State<AiChatPanel> {
 
   /// 选择图片
   Future<void> _pickImages() async {
-    final picker = ImagePicker();
-    final picked = await picker.pickMultiImage(
-      maxWidth: 1024,
-      maxHeight: 1024,
-      imageQuality: 80,
-    );
+    // 统一走共享的图片选择 + base64 编码逻辑
+    final picked = await pickImagesAsBase64();
     if (picked.isEmpty) return;
-    for (final xFile in picked) {
-      final file = File(xFile.path);
-      final bytes = await file.readAsBytes();
-      setState(() {
-        _pendingImages.add(file);
-        _pendingBase64.add(base64Encode(bytes));
-      });
-    }
+    setState(() {
+      _pendingImages.addAll(picked.map((e) => e.$2));
+      _pendingBase64.addAll(picked.map((e) => e.$1));
+    });
   }
 
   /// 移除待发送图片
@@ -137,27 +132,14 @@ class _AiChatPanelState extends State<AiChatPanel> {
 
     setState(() => _saving = true);
     final provider = context.read<TransactionProvider>();
-    final now = DateTime.now();
-    int success = 0;
-    String? lastError;
 
-    for (final result in results) {
-      final ok = await provider.add(Transaction(
-        userId: user.id,
-        amount: result.amount,
-        type: result.type == 'income'
-            ? TransactionType.income
-            : TransactionType.expense,
-        category: result.category,
-        date: now,
-        note: result.note,
-      ));
-      if (ok) {
-        success++;
-      } else {
-        lastError = provider.error;
-      }
-    }
+    final saveResult = await saveAiResults(
+      provider: provider,
+      userId: user.id,
+      results: results,
+    );
+    final success = saveResult.successCount;
+    final lastError = saveResult.lastError;
 
     if (!mounted) return;
     setState(() => _saving = false);
@@ -184,7 +166,11 @@ class _AiChatPanelState extends State<AiChatPanel> {
   /// 用户确认（或无重复）后调用 [_saveResults] 保存。
   Future<void> _autoSaveResults(
       int messageIndex, List<AiRecognitionResult> results) async {
-    final duplicates = await _findDuplicates(results);
+    final duplicates = await findDuplicateTransactions(
+      userId: context.read<AuthProvider>().user?.id,
+      provider: context.read<TransactionProvider>(),
+      results: results,
+    );
     if (!mounted) return;
 
     final hasDuplicates = duplicates.any((list) => list.isNotEmpty);
@@ -205,53 +191,16 @@ class _AiChatPanelState extends State<AiChatPanel> {
     }
   }
 
-  /// 检测识别结果中是否有与已有账单重复的
-  ///
-  /// 判断条件：同一用户、同一天、相同金额、相同类型、相同分类
-  /// 返回每个识别结果对应的重复交易列表（索引与 results 对应）。
-  Future<List<List<Transaction>>> _findDuplicates(
-      List<AiRecognitionResult> results) async {
-    final user = context.read<AuthProvider>().user;
-    if (user == null) return List.generate(results.length, (_) => []);
-
-    final provider = context.read<TransactionProvider>();
-    final now = DateTime.now();
-    // 查询最近 7 天的交易用于比对
-    final recent = await provider.queryByRange(
-      userId: user.id,
-      start: now.subtract(const Duration(days: 7)),
-      end: now,
-    );
-
-    // 为每个识别结果查找重复
-    final duplicates = <List<Transaction>>[];
-    for (final result in results) {
-      final type = result.type == 'income'
-          ? TransactionType.income
-          : TransactionType.expense;
-      // 重复判断：同一天、相同金额、相同类型、相同分类
-      final matches = recent.where((tx) {
-        return tx.amount == result.amount &&
-            tx.type == type &&
-            tx.category == result.category &&
-            _isSameDay(tx.date, now);
-      }).toList();
-      duplicates.add(matches);
-    }
-    return duplicates;
-  }
-
-  /// 判断两个日期是否为同一天
-  bool _isSameDay(DateTime a, DateTime b) {
-    return a.year == b.year && a.month == b.month && a.day == b.day;
-  }
-
   /// 获取某条 AI 消息识别结果的重复检测信息（带缓存）
   Future<List<List<Transaction>>> _getDuplicates(
       int messageIndex, List<AiRecognitionResult> results) {
     return _duplicatesCache.putIfAbsent(
       messageIndex,
-      () => _findDuplicates(results),
+      () => findDuplicateTransactions(
+        userId: context.read<AuthProvider>().user?.id,
+        provider: context.read<TransactionProvider>(),
+        results: results,
+      ),
     );
   }
 
@@ -283,28 +232,15 @@ class _AiChatPanelState extends State<AiChatPanel> {
   }
 
   Widget _buildEmptyHint(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.chat_bubble_outline,
-                size: 56, color: Theme.of(context).colorScheme.outline),
-            const SizedBox(height: 12),
-            const Text(
-              '开始与 AI 对话记账',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '例如："午饭花了 35 元"\n也可以发送账单图片',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Theme.of(context).colorScheme.outline),
-            ),
-          ],
-        ),
-      ),
+    return EmptyState(
+      icon: Icons.chat_bubble_outline,
+      iconSize: 56,
+      iconColor: Theme.of(context).colorScheme.outline,
+      title: '开始与 AI 对话记账',
+      titleStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+      gap: 12,
+      subtitle: '例如："午饭花了 35 元"\n也可以发送账单图片',
+      subtitleStyle: TextStyle(color: Theme.of(context).colorScheme.outline),
     );
   }
 

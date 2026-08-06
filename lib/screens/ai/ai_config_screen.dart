@@ -5,6 +5,8 @@ import '../../providers/ai_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../services/ai_service.dart';
 import '../../widgets/animated_dialog.dart';
+import '../../widgets/empty_state.dart';
+import '../../widgets/overlay_dropdown.dart';
 import 'ai_profile_edit_screen.dart';
 
 /// AI 配置页面
@@ -59,26 +61,14 @@ class AiConfigScreen extends StatelessWidget {
 
   /// 空状态
   Widget _buildEmpty(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.cloud_off,
-                size: 64, color: Theme.of(context).colorScheme.outline),
-            const SizedBox(height: 16),
-            const Text('尚未创建 AI 配置',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            const Text(
-              '点击右下角按钮创建第一个配置\n每个配置包含厂商、API Key 和模型选择',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey),
-            ),
-          ],
-        ),
-      ),
+    return EmptyState(
+      icon: Icons.cloud_off,
+      iconSize: 64,
+      iconColor: Theme.of(context).colorScheme.outline,
+      title: '尚未创建 AI 配置',
+      titleStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+      gap: 16,
+      subtitle: '点击右下角按钮创建第一个配置\n每个配置包含厂商、API Key 和模型选择',
     );
   }
 }
@@ -417,7 +407,9 @@ class _ProfileManageTile extends StatelessWidget {
         style: const TextStyle(fontSize: 12),
       ),
       isThreeLine: true,
-      trailing: _ProfileMenuButton(
+      trailing: OverlayDropdown<_MenuItem>(
+        // 菜单在三个点按钮下方右对齐弹出
+        rightAligned: true,
         items: [
           const _MenuItem(
               value: 'edit', label: '编辑', icon: Icons.edit_outlined),
@@ -425,15 +417,21 @@ class _ProfileManageTile extends StatelessWidget {
             const _MenuItem(
                 value: 'delete', label: '删除', icon: Icons.delete_outline),
         ],
-        onSelected: (v) {
-          if (v == 'edit') {
+        itemLabelOf: (item) => item.label,
+        itemIconOf: (item) => item.icon,
+        onSelected: (item) {
+          if (item.value == 'edit') {
             Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => AiProfileEditScreen(profile: profile),
             ));
-          } else if (v == 'delete') {
+          } else if (item.value == 'delete') {
             _confirmDelete(context, ai, profile);
           }
         },
+        anchor: (context, onTap) => IconButton(
+          icon: const Icon(Icons.more_vert),
+          onPressed: onTap,
+        ),
       ),
     );
   }
@@ -444,26 +442,13 @@ class _ProfileManageTile extends StatelessWidget {
     AiProvider ai,
     AiProfile profile,
   ) async {
-    final ok = await showAnimatedDialog<bool>(
+    final ok = await showConfirmDialog(
       context: context,
-      barrierLabel: '删除配置',
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('删除配置'),
-        content: Text('确认删除配置「${profile.name}」？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-            ),
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('删除'),
-          ),
-        ],
-      ),
+      title: '删除配置',
+      content: '确认删除配置「${profile.name}」？',
+      confirmText: '删除',
+      cancelText: '取消',
+      danger: true,
     );
     if (ok == true) {
       await ai.removeProfile(profile.id);
@@ -482,156 +467,4 @@ class _MenuItem {
   final String value;
   final String label;
   final IconData icon;
-}
-
-/// 配置管理中的更多操作按钮（三个点）
-///
-/// 自定义 Overlay 实现：
-/// - 弹出菜单显示在按钮下方（不覆盖三个点按钮）
-/// - 展开后再次点击按钮收起菜单
-/// - 点击菜单项或外部区域时关闭
-class _ProfileMenuButton extends StatefulWidget {
-  const _ProfileMenuButton({
-    required this.items,
-    required this.onSelected,
-  });
-
-  final List<_MenuItem> items;
-  final ValueChanged<String> onSelected;
-
-  @override
-  State<_ProfileMenuButton> createState() => _ProfileMenuButtonState();
-}
-
-class _ProfileMenuButtonState extends State<_ProfileMenuButton> {
-  final GlobalKey _key = GlobalKey();
-  OverlayEntry? _overlayEntry;
-
-  /// 打开 / 关闭菜单（再次点击收起）
-  void _toggle() {
-    if (_overlayEntry != null) {
-      _close();
-    } else {
-      _open();
-    }
-  }
-
-  /// 打开菜单
-  ///
-  /// 通过 GlobalKey 获取按钮位置，将菜单定位在按钮正下方，不覆盖按钮。
-  void _open() {
-    final renderBox = _key.currentContext?.findRenderObject() as RenderBox?;
-    if (renderBox == null) return;
-    final size = renderBox.size;
-    final position = renderBox.localToGlobal(Offset.zero);
-    final rect = position & size;
-
-    _overlayEntry = OverlayEntry(
-      builder: (context) => _ProfileMenuDropdown(
-        rect: rect,
-        items: widget.items,
-        onSelect: (v) {
-          _close();
-          widget.onSelected(v);
-        },
-        onDismiss: _close,
-      ),
-    );
-    Overlay.of(context).insert(_overlayEntry!);
-  }
-
-  /// 关闭菜单
-  void _close() {
-    _overlayEntry?.remove();
-    _overlayEntry = null;
-  }
-
-  @override
-  void dispose() {
-    _close();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      key: _key,
-      icon: const Icon(Icons.more_vert),
-      onPressed: _toggle,
-    );
-  }
-}
-
-/// 弹出菜单（Overlay）
-///
-/// 定位在三个点按钮下方，不覆盖按钮本身。
-/// 点击选项或外部区域时关闭。
-class _ProfileMenuDropdown extends StatelessWidget {
-  const _ProfileMenuDropdown({
-    required this.rect,
-    required this.items,
-    required this.onSelect,
-    required this.onDismiss,
-  });
-
-  /// 按钮的位置和大小
-  final Rect rect;
-  final List<_MenuItem> items;
-  final ValueChanged<String> onSelect;
-  final VoidCallback onDismiss;
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        // 全屏透明遮罩，点击关闭
-        GestureDetector(
-          onTap: onDismiss,
-          behavior: HitTestBehavior.opaque,
-          child: const SizedBox.expand(),
-        ),
-        // 弹出菜单：定位在按钮下方，右对齐按钮，不覆盖按钮
-        Positioned(
-          right: MediaQuery.of(context).size.width - rect.right,
-          top: rect.bottom + 4,
-          child: Material(
-            color: Colors.transparent,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Colors.black26,
-                    blurRadius: 8,
-                    offset: Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: items.map((item) {
-                  return InkWell(
-                    onTap: () => onSelect(item.value),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 12),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(item.icon, size: 18, color: Colors.grey[600]),
-                          const SizedBox(width: 8),
-                          Text(item.label, style: const TextStyle(fontSize: 14)),
-                        ],
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
 }

@@ -167,27 +167,13 @@ class _CategoryManagementScreenState extends State<CategoryManagementScreen>
     SettingsProvider settings,
     String name,
   ) async {
-    final ok = await showAnimatedDialog<bool>(
+    final ok = await showConfirmDialog(
       context: context,
-      barrierLabel: '删除分类',
-      // 使用对话框内部的 context 来 pop
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('删除分类'),
-        content: Text('确认删除分类「$name」？\n已使用此分类的记账记录不会被修改。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-            ),
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('删除'),
-          ),
-        ],
-      ),
+      title: '删除分类',
+      content: '确认删除分类「$name」？\n已使用此分类的记账记录不会被修改。',
+      confirmText: '删除',
+      cancelText: '取消',
+      danger: true,
     );
     if (ok == true) {
       await settings.removeCategory(_type, name);

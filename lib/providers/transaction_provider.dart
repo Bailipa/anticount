@@ -9,72 +9,18 @@ class TransactionProvider extends ChangeNotifier {
 
   final TransactionService _service;
 
-  List<Transaction> _items = const [];
-  bool _loading = false;
   String? _error;
 
-  // 查询条件
-  DateTime? _start;
-  DateTime? _end;
-  TransactionType? _typeFilter;
-  String? _categoryFilter;
-  String? _keyword;
-
-  List<Transaction> get items => _items;
-  bool get loading => _loading;
   String? get error => _error;
 
-  DateTime? get start => _start;
-  DateTime? get end => _end;
-  TransactionType? get typeFilter => _typeFilter;
-  String? get categoryFilter => _categoryFilter;
-  String? get keyword => _keyword;
-
-  /// 设置过滤条件并刷新
-  Future<void> setFilters({
-    DateTime? start,
-    DateTime? end,
-    TransactionType? typeFilter,
-    String? categoryFilter,
-    String? keyword,
-    bool clear = false,
-  }) async {
-    if (clear) {
-      _start = null;
-      _end = null;
-      _typeFilter = null;
-      _categoryFilter = null;
-      _keyword = null;
-    } else {
-      _start = start;
-      _end = end;
-      _typeFilter = typeFilter;
-      _categoryFilter = categoryFilter;
-      _keyword = keyword;
-    }
-    await refresh();
-  }
-
+  /// 刷新状态：清空错误并通知界面
+  ///
+  /// 数据获取由调用方通过 queryByRange 等接口完成，这里仅同步状态。
+  /// 内部仍被 add/update/delete 调用，用于写入后通知界面刷新。
   Future<void> refresh({int? userId}) async {
     if (userId == null) return;
-    _loading = true;
     _error = null;
     notifyListeners();
-    try {
-      _items = await _service.query(
-        userId: userId,
-        start: _start,
-        end: _end,
-        type: _typeFilter,
-        category: _categoryFilter,
-        keyword: _keyword,
-      );
-    } catch (e) {
-      _error = e.toString();
-    } finally {
-      _loading = false;
-      notifyListeners();
-    }
   }
 
   Future<bool> add(Transaction tx) async {
@@ -114,15 +60,6 @@ class TransactionProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     }
-  }
-
-  /// 统计当前过滤条件下的收支
-  Future<({double income, double expense})> summary(int userId) {
-    return _service.summary(
-      userId: userId,
-      start: _start,
-      end: _end,
-    );
   }
 
   /// 按时间范围查询交易列表（不影响当前 filter 状态）

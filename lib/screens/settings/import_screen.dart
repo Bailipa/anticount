@@ -9,6 +9,8 @@ import '../../providers/settings_provider.dart';
 import '../../providers/transaction_provider.dart';
 import '../../services/import_service.dart';
 import '../../widgets/animated_dialog.dart';
+import '../../widgets/app_button.dart';
+import '../../widgets/tag_badge.dart';
 
 /// 账单导入页面
 ///
@@ -96,20 +98,12 @@ class _ImportScreenState extends State<ImportScreen> {
 
   /// 选择文件按钮
   Widget _buildPickButton(BuildContext context) {
-    return FilledButton.icon(
+    return AppButton(
       onPressed: _picking || _processing ? null : _pickAndProcess,
-      icon: _picking
-          ? const SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : const Icon(Icons.file_download_outlined),
-      label: Text(_picking ? '选择中...' : '选择文件'),
-      style: FilledButton.styleFrom(
-        minimumSize: const Size.fromHeight(48),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
+      loading: _picking,
+      icon: const Icon(Icons.file_download_outlined),
+      label: _picking ? '选择中...' : '选择文件',
+      borderRadius: BorderRadius.circular(12),
     );
   }
 
@@ -224,32 +218,17 @@ class _ImportScreenState extends State<ImportScreen> {
                   ),
                 ),
                 if (bill.aiSource)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      'AI',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Theme.of(context).colorScheme.onPrimaryContainer,
-                      ),
-                    ),
+                  TagBadge(
+                    label: 'AI',
+                    backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                    textColor: Theme.of(context).colorScheme.onPrimaryContainer,
                   ),
                 if (bill.isDuplicate) ...[
                   const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.shade100,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Text(
-                      '重复',
-                      style: TextStyle(fontSize: 11, color: Colors.orange),
-                    ),
+                  TagBadge(
+                    label: '重复',
+                    backgroundColor: Colors.orange.shade100,
+                    textColor: Colors.orange,
                   ),
                 ],
                 IconButton(
@@ -372,14 +351,11 @@ class _ImportScreenState extends State<ImportScreen> {
   /// 保存按钮
   Widget _buildSaveButton(BuildContext context) {
     final selected = _bills.where((b) => b.selected).length;
-    return FilledButton.icon(
+    return AppButton(
       onPressed: selected == 0 ? null : _saveSelected,
       icon: const Icon(Icons.save),
-      label: Text('保存选中账单（$selected 条）'),
-      style: FilledButton.styleFrom(
-        minimumSize: const Size.fromHeight(48),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
+      label: '保存选中账单（$selected 条）',
+      borderRadius: BorderRadius.circular(12),
     );
   }
 
@@ -476,23 +452,12 @@ class _ImportScreenState extends State<ImportScreen> {
   ) async {
     final hasDuplicate = bills.any((b) => b.isDuplicate);
     if (hasDuplicate) {
-      final confirmed = await showAnimatedDialog<bool>(
+      final confirmed = await showConfirmDialog(
         context: context,
-        barrierLabel: '重复确认',
-        builder: (_) => AlertDialog(
-          title: const Text('发现重复账单'),
-          content: Text('检测到有 ${bills.where((b) => b.isDuplicate).length} 条账单可能与已有记录重复，是否继续保存？'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('继续保存'),
-            ),
-          ],
-        ),
+        title: '发现重复账单',
+        content: '检测到有 ${bills.where((b) => b.isDuplicate).length} 条账单可能与已有记录重复，是否继续保存？',
+        confirmText: '继续保存',
+        cancelText: '取消',
       );
       if (confirmed != true) {
         setState(() {

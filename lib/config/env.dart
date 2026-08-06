@@ -6,12 +6,10 @@
 /// 也可通过 --dart-define=ENV=prod 编译期注入环境。
 class EnvConfig {
   const EnvConfig({
-    required this.env,
     required this.appName,
     required this.dbName,
   });
 
-  final AppEnvironment env;
   final String appName;
   final String dbName;
 }
@@ -35,19 +33,16 @@ EnvConfig _resolveEnv(AppEnvironment env) {
   switch (env) {
     case AppEnvironment.prod:
       return const EnvConfig(
-        env: AppEnvironment.prod,
         appName: 'Anticount',
         dbName: 'anticount.db',
       );
     case AppEnvironment.staging:
       return const EnvConfig(
-        env: AppEnvironment.staging,
         appName: 'Anticount (Staging)',
         dbName: 'anticount_staging.db',
       );
     case AppEnvironment.dev:
       return const EnvConfig(
-        env: AppEnvironment.dev,
         appName: 'Anticount (Dev)',
         dbName: 'anticount_dev.db',
       );

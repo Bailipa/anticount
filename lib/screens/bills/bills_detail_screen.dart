@@ -6,6 +6,7 @@ import '../../models/transaction.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/transaction_provider.dart';
+import '../../utils/format.dart';
 import '../accounting/accounting_screen.dart';
 
 /// 账单详情页面
@@ -160,7 +161,7 @@ class _BillsDetailScreenState extends State<BillsDetailScreen> {
                         ].join(' · '),
                       ),
                       trailing: Text(
-                        '${isIncome ? '+' : '-'}$currency${tx.amount.toStringAsFixed(2)}',
+                        formatMoney(tx.amount, currency, sign: isIncome ? '+' : '-'),
                         style: TextStyle(
                           color: isIncome ? Colors.green : Colors.red,
                           fontWeight: FontWeight.w600,
@@ -180,7 +181,7 @@ class _BillsDetailScreenState extends State<BillsDetailScreen> {
             style: const TextStyle(color: Colors.grey, fontSize: 12)),
         const SizedBox(height: 4),
         Text(
-          '$currency${value.toStringAsFixed(2)}',
+          formatMoney(value, currency),
           style: TextStyle(
             color: color,
             fontSize: 16,

@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../providers/ai_provider.dart';
 import '../../services/ai_service.dart';
 import '../../widgets/animated_dialog.dart';
+import '../../widgets/overlay_dropdown.dart';
 import 'ai_error_dialog.dart';
 
 /// AI 配置编辑页面
@@ -230,9 +231,59 @@ class _AiProfileEditScreenState extends State<AiProfileEditScreen> {
           _SectionTitle('厂商'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: _VendorPicker(
-              vendor: _vendor,
-              onChanged: _onVendorChanged,
+            child: OverlayDropdown<AiVendor>(
+              // 启用卷帘门（下拉展开）动画
+              animate: true,
+              items: AiVendor.values,
+              isSelected: (v) => v == _vendor,
+              itemLabelOf: (v) =>
+                  '${v.label}（${v.supportsMultimodal ? '支持多模态' : '仅文本'}）',
+              itemIconOf: (v) => v.supportsMultimodal
+                  ? Icons.image_outlined
+                  : Icons.text_snippet_outlined,
+              onSelected: _onVendorChanged,
+              anchor: (context, onTap) => GestureDetector(
+                onTap: onTap,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: _vendor != null
+                          ? Theme.of(context).colorScheme.primary.withAlpha(120)
+                          : Theme.of(context).colorScheme.outline,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      if (_vendor != null)
+                        Icon(
+                          _vendor!.supportsMultimodal
+                              ? Icons.image_outlined
+                              : Icons.text_snippet_outlined,
+                          size: 18,
+                          color: Theme.of(context).colorScheme.primary,
+                        )
+                      else
+                        Icon(Icons.business_outlined,
+                            size: 18, color: Colors.grey[500]),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _vendor == null
+                            ? Text('选择厂商',
+                                style: TextStyle(
+                                    color: Colors.grey[500], fontSize: 14))
+                            : Text(
+                                '${_vendor!.label}（${_vendor!.supportsMultimodal ? '支持多模态' : '仅文本'}）',
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                      ),
+                      // 下拉箭头
+                      const Icon(Icons.arrow_drop_down, color: Colors.grey),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
           // 选择厂商后提供跳转开放平台按钮（获取 API Key）
@@ -368,255 +419,6 @@ class _SectionTitle extends StatelessWidget {
           fontSize: 13,
         ),
       ),
-    );
-  }
-}
-
-/// 厂商选择器
-///
-/// 圆角矩形外观 + 自定义 Overlay 下拉列表。
-/// 弹出列表宽度与选择组件一致，显示在选择组件正下方，不遮挡选择组件。
-/// 带卷帘门（下拉展开）动画。
-class _VendorPicker extends StatefulWidget {
-  const _VendorPicker({required this.vendor, required this.onChanged});
-
-  final AiVendor? vendor;
-  final ValueChanged<AiVendor> onChanged;
-
-  @override
-  State<_VendorPicker> createState() => _VendorPickerState();
-}
-
-class _VendorPickerState extends State<_VendorPicker>
-    with SingleTickerProviderStateMixin {
-  final GlobalKey _key = GlobalKey();
-  OverlayEntry? _overlayEntry;
-  late final AnimationController _animCtrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _animCtrl = AnimationController(
-      duration: const Duration(milliseconds: 200),
-      vsync: this,
-    );
-  }
-
-  @override
-  void dispose() {
-    _removeOverlay();
-    _animCtrl.dispose();
-    super.dispose();
-  }
-
-  /// 移除弹出列表
-  void _removeOverlay() {
-    _overlayEntry?.remove();
-    _overlayEntry = null;
-  }
-
-  /// 打开 / 关闭下拉列表
-  void _toggle() {
-    if (_overlayEntry != null) {
-      _close();
-    } else {
-      _open();
-    }
-  }
-
-  /// 打开下拉列表
-  ///
-  /// 通过 GlobalKey 获取选择组件的位置和大小，
-  /// 将弹出列表定位在选择组件正下方，宽度与选择组件一致。
-  void _open() {
-    final renderBox = _key.currentContext?.findRenderObject() as RenderBox?;
-    if (renderBox == null) return;
-    final size = renderBox.size;
-    final position = renderBox.localToGlobal(Offset.zero);
-    final rect = position & size;
-
-    _overlayEntry = OverlayEntry(
-      builder: (context) => _VendorDropdown(
-        rect: rect,
-        vendor: widget.vendor,
-        animCtrl: _animCtrl,
-        onSelect: (v) {
-          widget.onChanged(v);
-          _close();
-        },
-        onDismiss: _close,
-      ),
-    );
-    Overlay.of(context).insert(_overlayEntry!);
-    _animCtrl.forward(from: 0);
-  }
-
-  /// 关闭下拉列表
-  void _close() {
-    _animCtrl.reverse().then((_) {
-      _removeOverlay();
-      if (mounted) setState(() {});
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      key: _key,
-      onTap: _toggle,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: widget.vendor != null
-                ? Theme.of(context).colorScheme.primary.withAlpha(120)
-                : Theme.of(context).colorScheme.outline,
-          ),
-        ),
-        child: Row(
-          children: [
-            if (widget.vendor != null)
-              Icon(
-                widget.vendor!.supportsMultimodal
-                    ? Icons.image_outlined
-                    : Icons.text_snippet_outlined,
-                size: 18,
-                color: Theme.of(context).colorScheme.primary,
-              )
-            else
-              Icon(Icons.business_outlined, size: 18, color: Colors.grey[500]),
-            const SizedBox(width: 8),
-            Expanded(
-              child: widget.vendor == null
-                  ? Text('选择厂商',
-                      style: TextStyle(color: Colors.grey[500], fontSize: 14))
-                  : Text(
-                      '${widget.vendor!.label}（${widget.vendor!.supportsMultimodal ? '支持多模态' : '仅文本'}）',
-                      style: const TextStyle(fontSize: 14),
-                    ),
-            ),
-            // 下拉箭头
-            const Icon(Icons.arrow_drop_down, color: Colors.grey),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 厂商下拉列表（Overlay）
-///
-/// 定位在选择组件正下方，宽度与选择组件一致。
-/// 点击选项或外部区域时关闭。
-class _VendorDropdown extends StatelessWidget {
-  const _VendorDropdown({
-    required this.rect,
-    required this.vendor,
-    required this.animCtrl,
-    required this.onSelect,
-    required this.onDismiss,
-  });
-
-  /// 选择组件的位置和大小
-  final Rect rect;
-  final AiVendor? vendor;
-  final AnimationController animCtrl;
-  final ValueChanged<AiVendor> onSelect;
-  final VoidCallback onDismiss;
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        // 全屏透明遮罩，点击关闭
-        GestureDetector(
-          onTap: onDismiss,
-          behavior: HitTestBehavior.opaque,
-          child: const SizedBox.expand(),
-        ),
-        // 弹出列表：定位在选择组件下方，宽度一致
-        Positioned(
-          left: rect.left,
-          top: rect.bottom + 4,
-          width: rect.width,
-          child: AnimatedBuilder(
-            animation: animCtrl,
-            builder: (context, child) {
-              // 卷帘门效果：用 ClipRect + Align(heightFactor) 从顶部向下展开
-              return ClipRect(
-                child: Align(
-                  alignment: Alignment.topCenter,
-                  heightFactor: animCtrl.value,
-                  child: child,
-                ),
-              );
-            },
-            child: Material(
-              color: Colors.transparent,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Colors.black26,
-                      blurRadius: 8,
-                      offset: Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: AiVendor.values.map((v) {
-                    final selected = vendor == v;
-                    return InkWell(
-                      onTap: () => onSelect(v),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 12),
-                        child: Row(
-                          children: [
-                            Icon(
-                              v.supportsMultimodal
-                                  ? Icons.image_outlined
-                                  : Icons.text_snippet_outlined,
-                              size: 18,
-                              color: selected
-                                  ? Theme.of(context).colorScheme.primary
-                                  : Colors.grey[600],
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                '${v.label}（${v.supportsMultimodal ? '支持多模态' : '仅文本'}）',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: selected
-                                      ? Theme.of(context).colorScheme.primary
-                                      : null,
-                                  fontWeight:
-                                      selected ? FontWeight.w600 : null,
-                                ),
-                              ),
-                            ),
-                            if (selected)
-                              Icon(Icons.check,
-                                  size: 16,
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .primary),
-                          ],
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

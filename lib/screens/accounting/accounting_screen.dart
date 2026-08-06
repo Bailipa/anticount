@@ -6,6 +6,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/transaction_provider.dart';
 import '../../widgets/animated_dialog.dart';
+import '../../widgets/app_button.dart';
 import '../settings/category_management_screen.dart';
 
 /// 显示记账弹窗（新增 / 编辑）
@@ -335,21 +336,12 @@ class _AccountingSheetState extends State<AccountingSheet> {
                 ),
               ),
               const SizedBox(height: 20),
-              FilledButton.icon(
+              AppButton(
                 onPressed: _saving ? null : _save,
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(48),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                icon: _saving
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.save),
-                label: Text(widget.editing == null ? '保存' : '更新'),
+                loading: _saving,
+                icon: const Icon(Icons.save),
+                label: widget.editing == null ? '保存' : '更新',
+                borderRadius: BorderRadius.circular(12),
               ),
               const SizedBox(height: 16),
             ],

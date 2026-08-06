@@ -96,25 +96,14 @@ class UserProfileScreen extends StatelessWidget {
       final authProvider = context.read<AuthProvider>();
       final settings = context.read<SettingsProvider>();
       final retain = settings.retainDataOnLogout;
-      final ok = await showAnimatedDialog<bool>(
+      final ok = await showConfirmDialog(
         context: context,
-        barrierLabel: '退出登录',
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('退出登录'),
-          content: Text(retain
-              ? '确认退出当前账号？\n你的记账数据将保留，下次登录可继续查看。'
-              : '确认退出当前账号？\n根据你的设置，退出后本地记账数据将被清除。'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('退出'),
-            ),
-          ],
-        ),
+        title: '退出登录',
+        content: retain
+            ? '确认退出当前账号？\n你的记账数据将保留，下次登录可继续查看。'
+            : '确认退出当前账号？\n根据你的设置，退出后本地记账数据将被清除。',
+        confirmText: '退出',
+        cancelText: '取消',
       );
       if (ok == true) {
         await authProvider.logout(retainData: retain);

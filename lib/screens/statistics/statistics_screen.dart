@@ -8,6 +8,10 @@ import '../../providers/ai_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/transaction_provider.dart';
+import '../../utils/date_helpers.dart';
+import '../../utils/format.dart';
+import '../../widgets/empty_state.dart';
+import '../../widgets/period_switcher.dart';
 import '../ai/ai_config_screen.dart';
 
 /// 统计总结页面
@@ -33,6 +37,9 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   /// 柱状图显示窗口起始索引（每次展示 5 天/周）
   int _barWindowStart = 0;
 
+  /// 月份切换动画方向（true=向右滑动，false=向左滑动）
+  bool _monthSlideRight = true;
+
   bool _loading = true;
   List<Transaction> _transactions = [];
 
@@ -56,24 +63,12 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadData());
   }
 
-  /// 当前选中月的起始
-  DateTime get _monthStart =>
-      DateTime(_selectedMonth.year, _selectedMonth.month, 1);
-
-  /// 当前选中月的结束
-  DateTime get _monthEnd => DateTime(
-      _selectedMonth.year, _selectedMonth.month + 1, 0, 23, 59, 59, 999);
-
   /// 当前选中年的起始
   DateTime get _yearStart => DateTime(_selectedMonth.year, 1, 1);
 
   /// 当前选中年的结束
   DateTime get _yearEnd =>
       DateTime(_selectedMonth.year, 12, 31, 23, 59, 59, 999);
-
-  /// 当前选中月的天数
-  int get _monthDays =>
-      DateTime(_selectedMonth.year, _selectedMonth.month + 1, 0).day;
 
   /// 加载范围内交易数据
   Future<void> _loadData() async {
@@ -177,8 +172,10 @@ ${formatMap(expenseByCategory)}''';
     if (_pieMode == 0) {
       // 按月
       return _transactions.where((tx) {
-        return tx.date.isAfter(_monthStart.subtract(const Duration(seconds: 1))) &&
-            tx.date.isBefore(_monthEnd.add(const Duration(seconds: 1)));
+        return tx.date.isAfter(
+                monthStart(_selectedMonth).subtract(const Duration(seconds: 1))) &&
+            tx.date.isBefore(
+                monthEnd(_selectedMonth).add(const Duration(seconds: 1)));
       }).toList();
     }
     // 按年
@@ -189,8 +186,10 @@ ${formatMap(expenseByCategory)}''';
   List<Transaction> get _lineTransactions {
     // 折线图只展示当月数据（按日/按周均在当月内）
     return _transactions.where((tx) {
-      return tx.date.isAfter(_monthStart.subtract(const Duration(seconds: 1))) &&
-          tx.date.isBefore(_monthEnd.add(const Duration(seconds: 1)));
+      return tx.date.isAfter(
+              monthStart(_selectedMonth).subtract(const Duration(seconds: 1))) &&
+          tx.date.isBefore(
+              monthEnd(_selectedMonth).add(const Duration(seconds: 1)));
     }).toList();
   }
 
@@ -216,7 +215,7 @@ ${formatMap(expenseByCategory)}''';
   Map<String, ({double income, double expense})> _dailyTrendData() {
     final data = <String, ({double income, double expense})>{};
     // 初始化当月每一天
-    final daysInMonth = _monthDays;
+    final daysInMonth = monthDays(_selectedMonth);
     for (var day = 1; day <= daysInMonth; day++) {
       final date = DateTime(_selectedMonth.year, _selectedMonth.month, day);
       data[DateFormat('yyyy-MM-dd').format(date)] =
@@ -244,14 +243,14 @@ ${formatMap(expenseByCategory)}''';
   Map<String, ({double income, double expense})> _weeklyTrendData() {
     final data = <String, ({double income, double expense})>{};
     // 初始化当月的每一周（以周一为起点）
-    var currentMonday = _mondayOf(_monthStart);
-    while (currentMonday.isBefore(_monthEnd)) {
+    var currentMonday = mondayOf(monthStart(_selectedMonth));
+    while (currentMonday.isBefore(monthEnd(_selectedMonth))) {
       data[DateFormat('yyyy-MM-dd').format(currentMonday)] =
           (income: 0.0, expense: 0.0);
       currentMonday = currentMonday.add(const Duration(days: 7));
     }
     for (final tx in _lineTransactions) {
-      final monday = _mondayOf(tx.date);
+      final monday = mondayOf(tx.date);
       final key = DateFormat('yyyy-MM-dd').format(monday);
       final current = data[key] ?? (income: 0.0, expense: 0.0);
       if (tx.isIncome) {
@@ -269,11 +268,6 @@ ${formatMap(expenseByCategory)}''';
     return data;
   }
 
-  /// 计算指定日期所在周的周一
-  static DateTime _mondayOf(DateTime date) {
-    return DateTime(date.year, date.month, date.day - (date.weekday - 1));
-  }
-
   /// 选择月份
   Future<void> _pickMonth() async {
     final picked = await showDatePicker(
@@ -288,7 +282,10 @@ ${formatMap(expenseByCategory)}''';
         (picked.year != _selectedMonth.year ||
             picked.month != _selectedMonth.month)) {
       setState(() {
-        _selectedMonth = DateTime(picked.year, picked.month);
+        final next = DateTime(picked.year, picked.month);
+        // 月份减小向右滑动、增大向左滑动（与账单页语义一致）
+        _monthSlideRight = next.isBefore(_selectedMonth);
+        _selectedMonth = next;
         // 切换月份后重置柱状图窗口
         _barWindowStart = 0;
       });
@@ -298,6 +295,8 @@ ${formatMap(expenseByCategory)}''';
 
   void _prevMonth() {
     setState(() {
+      // 月份减小：内容向右滑动
+      _monthSlideRight = true;
       _selectedMonth =
           DateTime(_selectedMonth.year, _selectedMonth.month - 1);
     });
@@ -309,6 +308,8 @@ ${formatMap(expenseByCategory)}''';
     final next = DateTime(_selectedMonth.year, _selectedMonth.month + 1);
     if (next.isAfter(DateTime(now.year, now.month, 1))) return;
     setState(() {
+      // 月份增大：内容向左滑动
+      _monthSlideRight = false;
       _selectedMonth = next;
     });
     _loadData();
@@ -359,39 +360,14 @@ ${formatMap(expenseByCategory)}''';
     final title = _pieMode == 0
         ? '${_selectedMonth.year}年${_selectedMonth.month}月'
         : '${_selectedMonth.year}年';
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          IconButton(
-            icon: const Icon(Icons.chevron_left),
-            onPressed: _prevMonth,
-          ),
-          GestureDetector(
-            onTap: _pickMonth,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(20),
-                color: Theme.of(context).colorScheme.primaryContainer,
-              ),
-              child: Text(
-                title,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onPrimaryContainer,
-                ),
-              ),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.chevron_right),
-            onPressed: _nextMonth,
-          ),
-        ],
-      ),
+    return PeriodSwitcher(
+      title: title,
+      titleKey: ValueKey<String>(title),
+      onPrev: _prevMonth,
+      onNext: _nextMonth,
+      onTitleTap: _pickMonth,
+      slideRight: _monthSlideRight,
+      canGoNext: true,
     );
   }
 
@@ -490,9 +466,7 @@ ${formatMap(expenseByCategory)}''';
               if (!hasData)
                 const SizedBox(
                   height: 200,
-                  child: Center(
-                    child: Text('暂无数据', style: TextStyle(color: Colors.grey)),
-                  ),
+                  child: EmptyState(title: '暂无数据'),
                 )
               else ...[
                 if (expenseData.isNotEmpty)
@@ -684,9 +658,7 @@ ${formatMap(expenseByCategory)}''';
               if (!hasData)
                 const SizedBox(
                   height: 200,
-                  child: Center(
-                    child: Text('暂无数据', style: TextStyle(color: Colors.grey)),
-                  ),
+                  child: EmptyState(title: '暂无数据'),
                 )
               else ...[
                 // 时间范围提示
@@ -990,7 +962,7 @@ class _SummaryItem extends StatelessWidget {
             style: TextStyle(fontSize: 13, color: Colors.grey[600])),
         const SizedBox(height: 4),
         Text(
-          '$currency${amount.toStringAsFixed(2)}',
+          formatMoney(amount, currency),
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.bold,

@@ -105,6 +105,9 @@ enum AiVendor {
     }
   }
 
+  /// 该厂商是否支持 response_format JSON 输出模式
+  bool get jsonMode => this == AiVendor.deepseek;
+
   /// 该厂商可用的模型列表（含类型信息）
   List<AiModel> get availableModels {
     switch (this) {
@@ -167,14 +170,6 @@ enum AiVendor {
   /// 该厂商是否支持多模态（图片输入）
   bool get supportsMultimodal => multimodalModelIds.isNotEmpty;
 
-  /// 根据 ID 查找模型
-  AiModel? findModel(String id) {
-    for (final m in availableModels) {
-      if (m.id == id) return m;
-    }
-    return null;
-  }
-
   /// 厂商创建 API Key 的帮助链接
   String get helpUrl {
     switch (this) {
@@ -227,17 +222,6 @@ class AiModelConfig {
         apiKey: map['apiKey'] as String? ?? '',
         modelId: map['modelId'] as String? ?? '',
       );
-
-  AiModelConfig copyWith({
-    AiVendor? vendor,
-    String? apiKey,
-    String? modelId,
-  }) =>
-      AiModelConfig(
-        vendor: vendor ?? this.vendor,
-        apiKey: apiKey ?? this.apiKey,
-        modelId: modelId ?? this.modelId,
-      );
 }
 
 /// AI 配置（Profile）
@@ -287,18 +271,6 @@ class AiProfile {
             ? AiModelConfig.fromMap(
                 map['multimodalConfig'] as Map<String, dynamic>)
             : null,
-      );
-
-  AiProfile copyWith({
-    String? name,
-    AiModelConfig? textConfig,
-    AiModelConfig? multimodalConfig,
-  }) =>
-      AiProfile(
-        id: id,
-        name: name ?? this.name,
-        textConfig: textConfig ?? this.textConfig,
-        multimodalConfig: multimodalConfig ?? this.multimodalConfig,
       );
 }
 
@@ -493,26 +465,6 @@ class AiService {
     }
   }
 
-  /// 获取文字识别激活的配置
-  Future<AiProfile?> getActiveTextProfile() async {
-    final id = await getActiveTextProfileId();
-    if (id == null) return null;
-    final profiles = await getProfiles();
-    if (profiles.isEmpty) return null;
-    return profiles.firstWhere((p) => p.id == id,
-        orElse: () => profiles.first);
-  }
-
-  /// 获取图像识别激活的配置
-  Future<AiProfile?> getActiveMultimodalProfile() async {
-    final id = await getActiveMultimodalProfileId();
-    if (id == null) return null;
-    final profiles = await getProfiles();
-    if (profiles.isEmpty) return null;
-    return profiles.firstWhere((p) => p.id == id,
-        orElse: () => profiles.first);
-  }
-
   /// 获取文字识别当前选中的模型 ID（覆盖 Profile 默认）
   /// 若未设置，返回 null，调用方应回退到 Profile.textConfig.modelId
   Future<String?> getActiveTextModelId() async {
@@ -577,6 +529,75 @@ class AiService {
     // OpenAI: {choices: [{message: {content: '...'}}]}
     final choices = data['choices'] as List;
     return choices.first['message']['content'] as String;
+  }
+
+  /// 发送 HTTP POST 请求，统一处理超时、网络错误与状态码检查
+  ///
+  /// [timeoutMessage] 超时时的提示文案；
+  /// [networkPrefix] 网络错误提示前缀（拼接为「$networkPrefix网络请求失败：$e」）；
+  /// [statusPrefix] 状态码非 200 时的错误前缀（拼接为「${statusPrefix}（code）：body」）。
+  Future<http.Response> _post({
+    required AiModelConfig config,
+    required String url,
+    required Map<String, dynamic> body,
+    required String timeoutMessage,
+    required String statusPrefix,
+    String networkPrefix = '',
+  }) async {
+    final http.Response response;
+    try {
+      response = await http.post(
+        Uri.parse(url),
+        headers: _buildHeaders(config.vendor, config.apiKey),
+        body: jsonEncode(body),
+      ).timeout(_kRequestTimeout);
+    } on TimeoutException {
+      throw AiException(timeoutMessage);
+    } catch (e) {
+      throw AiException('$networkPrefix网络请求失败：$e');
+    }
+
+    if (response.statusCode != 200) {
+      throw AiException('$statusPrefix（${response.statusCode}）：${response.body}');
+    }
+    return response;
+  }
+
+  /// 执行带重试的 AI 识别请求（最多 3 次）
+  ///
+  /// [buildBody] 每次尝试都会重新构造请求体（不同厂商格式不同）。
+  /// 解析失败时延迟 500ms 重试；第 3 次仍失败则抛出异常。
+  Future<AiRecognitionResult> _recognizeWithRetry({
+    required AiModelConfig config,
+    required String url,
+    required Map<String, dynamic> Function() buildBody,
+    required List<String> validCategories,
+  }) async {
+    // 最多重试 3 次
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      final response = await _post(
+        config: config,
+        url: url,
+        body: buildBody(),
+        timeoutMessage: 'API 请求超时（20s），请检查网络或代理设置',
+        statusPrefix: 'API 请求失败',
+      );
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final content = _extractContent(config.vendor, data);
+      try {
+        return _parseResult(content, validCategories: validCategories);
+      } catch (e) {
+        // 解析失败，如果是最后一次尝试，抛出异常
+        if (attempt == 3) {
+          throw AiException('AI 返回结果无法解析（已重试 3 次）：$content');
+        }
+        // 否则继续重试
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+    }
+    // 逻辑上不会到达
+    throw const AiException('AI 识别失败');
   }
 
   /// 验证 API Key 是否有效
@@ -700,71 +721,38 @@ class AiService {
     final url = _buildEndpoint(config.vendor);
     final isAnthropic = config.vendor.apiFormat == AiApiFormat.anthropic;
     // DeepSeek 支持 response_format JSON Output
-    final useJsonMode = config.vendor == AiVendor.deepseek;
+    final useJsonMode = config.vendor.jsonMode;
 
-    // 最多重试 3 次
-    for (var attempt = 1; attempt <= 3; attempt++) {
-      final body = <String, dynamic>{
-        'model': config.modelId,
-        'max_tokens': 1024,
-        // 不传 temperature，让 API 用默认值（某些思考模型只允许 1）
-      };
+    return _recognizeWithRetry(
+      config: config,
+      url: url,
+      validCategories: [...expenseCategories, ...incomeCategories],
+      buildBody: () {
+        final body = <String, dynamic>{
+          'model': config.modelId,
+          'max_tokens': 1024,
+          // 不传 temperature，让 API 用默认值（某些思考模型只允许 1）
+        };
 
-      if (isAnthropic) {
-        // Anthropic: system 作为顶层字段，messages 仅含 user
-        body['system'] = prompt;
-        body['messages'] = [
-          {'role': 'user', 'content': text},
-        ];
-      } else {
-        // OpenAI 格式: system 作为 message
-        body['messages'] = [
-          {'role': 'system', 'content': prompt},
-          {'role': 'user', 'content': text},
-        ];
-      }
-      if (useJsonMode) {
-        body['response_format'] = {'type': 'json_object'};
-      }
-
-      final http.Response response;
-      try {
-        response = await http.post(
-          Uri.parse(url),
-          headers: _buildHeaders(config.vendor, config.apiKey),
-          body: jsonEncode(body),
-        ).timeout(_kRequestTimeout);
-      } on TimeoutException {
-        // 超时直接抛出，不重试
-        throw const AiException('API 请求超时（20s），请检查网络或代理设置');
-      } catch (e) {
-        // 网络错误直接抛出，不重试
-        throw AiException('网络请求失败：$e');
-      }
-
-      if (response.statusCode != 200) {
-        throw AiException(
-            'API 请求失败（${response.statusCode}）：${response.body}');
-      }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final content = _extractContent(config.vendor, data);
-      try {
-        return _parseResult(
-          content,
-          validCategories: [...expenseCategories, ...incomeCategories],
-        );
-      } catch (e) {
-        // 解析失败，如果是最后一次尝试，抛出异常
-        if (attempt == 3) {
-          throw AiException('AI 返回结果无法解析（已重试 3 次）：$content');
+        if (isAnthropic) {
+          // Anthropic: system 作为顶层字段，messages 仅含 user
+          body['system'] = prompt;
+          body['messages'] = [
+            {'role': 'user', 'content': text},
+          ];
+        } else {
+          // OpenAI 格式: system 作为 message
+          body['messages'] = [
+            {'role': 'system', 'content': prompt},
+            {'role': 'user', 'content': text},
+          ];
         }
-        // 否则继续重试
-        await Future.delayed(const Duration(milliseconds: 500));
-      }
-    }
-    // 逻辑上不会到达
-    throw const AiException('AI 识别失败');
+        if (useJsonMode) {
+          body['response_format'] = {'type': 'json_object'};
+        }
+        return body;
+      },
+    );
   }
 
   /// 调用 AI 识别记账信息（图片 + 文本）
@@ -793,89 +781,56 @@ class AiService {
     final url = _buildEndpoint(config.vendor);
     final isAnthropic = config.vendor.apiFormat == AiApiFormat.anthropic;
 
-    // 最多重试 3 次
-    for (var attempt = 1; attempt <= 3; attempt++) {
-      final Map<String, dynamic> body;
-      if (isAnthropic) {
-        // Anthropic: system 顶层字段，图片用 source 结构
-        final content = <Map<String, dynamic>>[
-          {
-            'type': 'image',
-            'source': {
-              'type': 'base64',
-              'media_type': 'image/jpeg',
-              'data': base64Image,
+    return _recognizeWithRetry(
+      config: config,
+      url: url,
+      validCategories: [...expenseCategories, ...incomeCategories],
+      buildBody: () {
+        final Map<String, dynamic> body;
+        if (isAnthropic) {
+          // Anthropic: system 顶层字段，图片用 source 结构
+          final content = <Map<String, dynamic>>[
+            {
+              'type': 'image',
+              'source': {
+                'type': 'base64',
+                'media_type': 'image/jpeg',
+                'data': base64Image,
+              },
             },
-          },
-          if (textHint != null && textHint.isNotEmpty)
-            {'type': 'text', 'text': textHint},
-        ];
-        body = {
-          'model': config.modelId,
-          'max_tokens': 1024,
-          'system': prompt,
-          'messages': [
-            {'role': 'user', 'content': content},
-          ],
-        };
-      } else {
-        // OpenAI 格式: prompt 作为 text 内容块，图片用 image_url
-        final content = <Map<String, dynamic>>[
-          {'type': 'text', 'text': prompt},
-          {
-            'type': 'image_url',
-            'image_url': {'url': 'data:image/jpeg;base64,$base64Image'},
-          },
-          if (textHint != null && textHint.isNotEmpty)
-            {'type': 'text', 'text': textHint},
-        ];
-        body = {
-          'model': config.modelId,
-          'max_tokens': 1024,
-          'messages': [
-            {'role': 'user', 'content': content},
-          ],
-        };
-      }
-
-      final http.Response response;
-      try {
-        response = await http.post(
-          Uri.parse(url),
-          headers: _buildHeaders(config.vendor, config.apiKey),
-          body: jsonEncode(body),
-        ).timeout(_kRequestTimeout);
-      } on TimeoutException {
-        // 超时直接抛出，不重试
-        throw const AiException('API 请求超时（20s），请检查网络或代理设置');
-      } catch (e) {
-        // 网络错误直接抛出，不重试
-        throw AiException('网络请求失败：$e');
-      }
-
-      if (response.statusCode != 200) {
-        throw AiException(
-            'API 请求失败（${response.statusCode}）：${response.body}');
-      }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final content = _extractContent(config.vendor, data);
-      try {
-        return _parseResult(
-          content,
-          validCategories: [...expenseCategories, ...incomeCategories],
-        );
-      } catch (e) {
-        // 解析失败，如果是最后一次尝试，抛出异常
-        if (attempt == 3) {
-          throw AiException('AI 返回结果无法解析（已重试 3 次）：$content');
+            if (textHint != null && textHint.isNotEmpty)
+              {'type': 'text', 'text': textHint},
+          ];
+          body = {
+            'model': config.modelId,
+            'max_tokens': 1024,
+            'system': prompt,
+            'messages': [
+              {'role': 'user', 'content': content},
+            ],
+          };
+        } else {
+          // OpenAI 格式: prompt 作为 text 内容块，图片用 image_url
+          final content = <Map<String, dynamic>>[
+            {'type': 'text', 'text': prompt},
+            {
+              'type': 'image_url',
+              'image_url': {'url': 'data:image/jpeg;base64,$base64Image'},
+            },
+            if (textHint != null && textHint.isNotEmpty)
+              {'type': 'text', 'text': textHint},
+          ];
+          body = {
+            'model': config.modelId,
+            'max_tokens': 1024,
+            'messages': [
+              {'role': 'user', 'content': content},
+            ],
+          };
         }
-        // 否则继续重试
-        await Future.delayed(const Duration(milliseconds: 500));
-      }
-    }
-    // 逻辑上不会到达
-    throw const AiException('AI 识别失败');
+        return body;
+      },
+    );
   }
 
   /// AI 对话模式
@@ -966,22 +921,14 @@ class AiService {
       ];
     }
 
-    final http.Response response;
-    try {
-      response = await http.post(
-        Uri.parse(url),
-        headers: _buildHeaders(config.vendor, config.apiKey),
-        body: jsonEncode(body),
-      ).timeout(_kRequestTimeout);
-    } on TimeoutException {
-      throw const AiException('AI 对话请求超时（20s），请检查网络或代理设置');
-    } catch (e) {
-      throw AiException('AI 对话网络请求失败：$e');
-    }
-
-    if (response.statusCode != 200) {
-      throw AiException('AI 对话请求失败（${response.statusCode}）：${response.body}');
-    }
+    final response = await _post(
+      config: config,
+      url: url,
+      body: body,
+      timeoutMessage: 'AI 对话请求超时（20s），请检查网络或代理设置',
+      statusPrefix: 'AI 对话请求失败',
+      networkPrefix: 'AI 对话',
+    );
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final content = _extractContent(config.vendor, data);
@@ -1017,32 +964,31 @@ class AiService {
     final results = <AiRecognitionResult>[];
 
     // 优先匹配 ```json ... ``` 或 ``` ... ``` 包裹的 JSON
-    var jsonStr = content.trim();
+    final jsonStr = content.trim();
     if (jsonStr.contains('```')) {
       final matches = RegExp(r'```(?:json)?\s*([\s\S]*?)```').allMatches(jsonStr);
       for (final match in matches) {
         final block = match.group(1)?.trim() ?? '';
-        try {
-          final decoded = jsonDecode(block);
-          if (decoded is Map<String, dynamic>) {
-            if (decoded.containsKey('bills')) {
-              final bills = decoded['bills'] as List;
-              for (final bill in bills) {
-                results.add(_parseSingleResult(bill as Map<String, dynamic>, validCategories));
-              }
-            } else {
-              results.add(_parseSingleResult(decoded, validCategories));
-            }
-          }
-        } catch (_) {
-          // 该 block 不是有效账单 JSON，忽略
-        }
+        results.addAll(_tryDecodeMap(block, validCategories));
       }
     }
 
     if (results.isNotEmpty) return results;
 
     // 没有 markdown block，尝试整个内容是否就是 JSON
+    results.addAll(_tryDecodeMap(jsonStr, validCategories));
+
+    return results;
+  }
+
+  /// 尝试把字符串解码为账单，支持 {"bills": [...]} 数组与单条对象两种形式
+  ///
+  /// 解码失败或内容不是账单 JSON 时返回空列表（忽略该内容）。
+  List<AiRecognitionResult> _tryDecodeMap(
+    String jsonStr,
+    List<String> validCategories,
+  ) {
+    final results = <AiRecognitionResult>[];
     try {
       final decoded = jsonDecode(jsonStr);
       if (decoded is Map<String, dynamic>) {
@@ -1056,9 +1002,8 @@ class AiService {
         }
       }
     } catch (_) {
-      // 不是 JSON，视为普通文本
+      // 该内容不是有效账单 JSON，忽略
     }
-
     return results;
   }
 
@@ -1066,32 +1011,7 @@ class AiService {
     Map<String, dynamic> map,
     List<String> validCategories,
   ) {
-    final rawAmount = map['amount'];
-    if (rawAmount == null) {
-      throw AiException('缺少 amount 字段');
-    }
-    final amount = (rawAmount as num).toDouble();
-    if (amount <= 0) {
-      throw AiException('amount 必须为正数');
-    }
-
-    final type = (map['type'] as String?)?.toLowerCase();
-    if (type != 'income' && type != 'expense') {
-      throw AiException('type 字段无效');
-    }
-
-    final category = (map['category'] as String?) ?? '';
-    if (category.isEmpty || !validCategories.contains(category)) {
-      throw AiException('category 不在分类列表中');
-    }
-
-    final note = map['note'] as String?;
-    return AiRecognitionResult(
-      amount: amount,
-      type: type == 'income' ? 'income' : 'expense',
-      category: category,
-      note: note,
-    );
+    return _parseMap(map, validCategories);
   }
 
   /// 移除回复中的 JSON 代码块，保留自然语言部分
@@ -1169,6 +1089,48 @@ class AiService {
 4. 仅返回 JSON 对象，不要包裹在 markdown 代码块中''';
   }
 
+  /// 校验字段并构建识别结果（amount>0、type、category 白名单）
+  ///
+  /// [errorSuffix] 追加到校验错误信息末尾（如原始内容），便于排查。
+  AiRecognitionResult _parseMap(
+    Map<String, dynamic> map,
+    List<String> validCategories, {
+    String errorSuffix = '',
+  }) {
+    // amount 必须是正数
+    final rawAmount = map['amount'];
+    if (rawAmount == null) {
+      throw AiException('缺少 amount 字段$errorSuffix');
+    }
+    final amount = (rawAmount as num).toDouble();
+    if (amount <= 0) {
+      throw AiException('amount 必须为正数$errorSuffix');
+    }
+
+    // type 必须是 income 或 expense
+    final type = (map['type'] as String?)?.toLowerCase();
+    if (type != 'income' && type != 'expense') {
+      throw AiException('type 字段无效$errorSuffix');
+    }
+
+    // category 必须在分类列表中
+    final category = (map['category'] as String?) ?? '';
+    if (category.isEmpty || !validCategories.contains(category)) {
+      throw AiException('category 不在分类列表中$errorSuffix');
+    }
+
+    final note = map['note'] as String?;
+    return AiRecognitionResult(
+      amount: amount,
+      type: type == 'income' ? 'income' : 'expense',
+      category: category,
+      note: note,
+    );
+  }
+
+  /// 解析识别请求的返回内容（自动剥离 markdown 代码块）
+  ///
+  /// 校验失败时错误信息附带上文，便于排查 AI 原始输出。
   AiRecognitionResult _parseResult(
     String content, {
     required List<String> validCategories,
@@ -1182,36 +1144,7 @@ class AiService {
     }
 
     final map = jsonDecode(jsonStr) as Map<String, dynamic>;
-
-    // amount 必须是正数
-    final rawAmount = map['amount'];
-    if (rawAmount == null) {
-      throw AiException('缺少 amount 字段: $content');
-    }
-    final amount = (rawAmount as num).toDouble();
-    if (amount <= 0) {
-      throw AiException('amount 必须为正数: $content');
-    }
-
-    // type 必须是 income 或 expense
-    final type = (map['type'] as String?)?.toLowerCase();
-    if (type != 'income' && type != 'expense') {
-      throw AiException('type 字段无效: $content');
-    }
-
-    // category 必须在分类列表中
-    final category = (map['category'] as String?) ?? '';
-    if (category.isEmpty || !validCategories.contains(category)) {
-      throw AiException('category 不在分类列表中: $content');
-    }
-
-    final note = map['note'] as String?;
-    return AiRecognitionResult(
-      amount: amount,
-      type: type == 'income' ? 'income' : 'expense',
-      category: category,
-      note: note,
-    );
+    return _parseMap(map, validCategories, errorSuffix: ': $content');
   }
 }
 

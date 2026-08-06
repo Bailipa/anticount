@@ -139,6 +139,58 @@ class _TextInputDialogState extends State<_TextInputDialog> {
   }
 }
 
+/// 通用确认对话框
+///
+/// 返回用户选择：true=确认，false/null=取消。
+/// [danger] 为 true 时确认按钮使用红色（危险操作）；
+/// [icon] 可选，在标题上方显示图标（如删除类操作）。
+Future<bool?> showConfirmDialog({
+  required BuildContext context,
+  required String title,
+  String? content,
+  String confirmText = '确认',
+  String cancelText = '取消',
+  bool danger = false,
+  IconData? icon,
+}) {
+  return showDialog<bool?>(
+    context: context,
+    barrierDismissible: true,
+    useSafeArea: true,
+    builder: (dialogContext) => AlertDialog(
+      title: icon == null
+          ? Text(title)
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon,
+                    size: 40,
+                    color: Theme.of(dialogContext).colorScheme.error),
+                const SizedBox(height: 12),
+                Text(title),
+              ],
+            ),
+      content: content == null ? null : Text(content),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: Text(cancelText),
+        ),
+        FilledButton(
+          // 危险操作时确认按钮使用主题错误色（红色）
+          style: danger
+              ? FilledButton.styleFrom(
+                  backgroundColor: Theme.of(dialogContext).colorScheme.error,
+                )
+              : null,
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: Text(confirmText),
+        ),
+      ],
+    ),
+  );
+}
+
 /// 信息提示弹窗（带"确认"按钮）
 ///
 /// 用于替换重要信息/错误提示的 SnackBar，确保用户看到并确认。

@@ -1,17 +1,20 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
-import '../../models/transaction.dart';
 import '../../providers/ai_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/transaction_provider.dart';
 import '../../services/ai_service.dart';
+import '../../utils/ai_result_saver.dart';
+import '../../utils/duplicate_check.dart';
+import '../../utils/format.dart';
+import '../../utils/image_picker_helper.dart';
 import '../../widgets/animated_dialog.dart';
+import '../../widgets/app_button.dart';
+import '../../widgets/tag_badge.dart';
 import 'ai_chat_panel.dart';
 import 'ai_config_screen.dart';
 import 'ai_error_dialog.dart';
@@ -66,25 +69,12 @@ class _AiAccountingScreenState extends State<AiAccountingScreen> {
 
   /// 选择多张图片
   Future<void> _pickImages() async {
-    final picker = ImagePicker();
-    // 使用 pickMultiImage 支持多选
-    final picked = await picker.pickMultiImage(
-      maxWidth: 1024,
-      maxHeight: 1024,
-      imageQuality: 80,
-    );
+    // 统一走共享的图片选择 + base64 编码逻辑
+    final picked = await pickImagesAsBase64();
     if (picked.isEmpty) return;
-    final newFiles = <File>[];
-    final newBase64 = <String>[];
-    for (final xFile in picked) {
-      final file = File(xFile.path);
-      final bytes = await file.readAsBytes();
-      newFiles.add(file);
-      newBase64.add(base64Encode(bytes));
-    }
     setState(() {
-      _selectedImages.addAll(newFiles);
-      _base64Images.addAll(newBase64);
+      _selectedImages.addAll(picked.map((e) => e.$2));
+      _base64Images.addAll(picked.map((e) => e.$1));
     });
   }
 
@@ -194,7 +184,11 @@ class _AiAccountingScreenState extends State<AiAccountingScreen> {
   /// 自动记账模式下，识别完成后弹出此对话框展示识别结果，
   /// 并检测是否有重复账单，用户确认后才保存。
   Future<void> _showAutoSaveConfirmDialog() async {
-    final duplicates = await _findDuplicates(_results);
+    final duplicates = await findDuplicateTransactions(
+      userId: context.read<AuthProvider>().user?.id,
+      provider: context.read<TransactionProvider>(),
+      results: _results,
+    );
     if (!mounted) return;
 
     final confirmed = await showAnimatedDialog<bool>(
@@ -211,52 +205,15 @@ class _AiAccountingScreenState extends State<AiAccountingScreen> {
     }
   }
 
-  /// 检测识别结果中是否有与已有账单重复的
-  ///
-  /// 判断条件：同一用户、同一天、相同金额、相同类型、相同分类
-  /// 返回每个识别结果对应的重复交易列表（索引与 _results 对应）。
-  Future<List<List<Transaction>>> _findDuplicates(
-      List<AiRecognitionResult> results) async {
-    final user = context.read<AuthProvider>().user;
-    if (user == null) return List.generate(results.length, (_) => []);
-
-    final provider = context.read<TransactionProvider>();
-    final now = DateTime.now();
-    // 查询最近 7 天的交易用于比对
-    final recent = await provider.queryByRange(
-      userId: user.id,
-      start: now.subtract(const Duration(days: 7)),
-      end: now,
-    );
-
-    // 为每个识别结果查找重复
-    final duplicates = <List<Transaction>>[];
-    for (final result in results) {
-      final type = result.type == 'income'
-          ? TransactionType.income
-          : TransactionType.expense;
-      // 重复判断：同一天、相同金额、相同类型、相同分类
-      final matches = recent.where((tx) {
-        return tx.amount == result.amount &&
-            tx.type == type &&
-            tx.category == result.category &&
-            _isSameDay(tx.date, now);
-      }).toList();
-      duplicates.add(matches);
-    }
-    return duplicates;
-  }
-
-  /// 判断两个日期是否为同一天
-  bool _isSameDay(DateTime a, DateTime b) {
-    return a.year == b.year && a.month == b.month && a.day == b.day;
-  }
-
   /// 手动保存时检测重复并提示
   ///
   /// 返回 true 表示用户确认保存（或无重复），false 表示取消。
   Future<bool> _checkDuplicatesBeforeManualSave() async {
-    final duplicates = await _findDuplicates(_results);
+    final duplicates = await findDuplicateTransactions(
+      userId: context.read<AuthProvider>().user?.id,
+      provider: context.read<TransactionProvider>(),
+      results: _results,
+    );
     // 如果没有重复，直接返回 true
     final hasAnyDuplicate = duplicates.any((list) => list.isNotEmpty);
     if (!hasAnyDuplicate) return true;
@@ -287,27 +244,14 @@ class _AiAccountingScreenState extends State<AiAccountingScreen> {
 
     setState(() => _saving = true);
     final provider = context.read<TransactionProvider>();
-    final now = DateTime.now();
 
-    int successCount = 0;
-    String? lastError;
-    for (final result in results) {
-      final ok = await provider.add(Transaction(
-        userId: user.id,
-        amount: result.amount,
-        type: result.type == 'income'
-            ? TransactionType.income
-            : TransactionType.expense,
-        category: result.category,
-        date: now,
-        note: result.note,
-      ));
-      if (ok) {
-        successCount++;
-      } else {
-        lastError = provider.error;
-      }
-    }
+    final saveResult = await saveAiResults(
+      provider: provider,
+      userId: user.id,
+      results: results,
+    );
+    final successCount = saveResult.successCount;
+    final lastError = saveResult.lastError;
 
     if (!mounted) return;
     setState(() => _saving = false);
@@ -364,28 +308,11 @@ class _AiAccountingScreenState extends State<AiAccountingScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.bolt,
-                          size: 14,
-                          color: Theme.of(context).colorScheme.onPrimaryContainer),
-                      const SizedBox(width: 4),
-                      Text(
-                        '自动记账',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Theme.of(context).colorScheme.onPrimaryContainer,
-                        ),
-                      ),
-                    ],
-                  ),
+                child: TagBadge(
+                  icon: Icons.bolt,
+                  label: '自动记账',
+                  backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                  textColor: Theme.of(context).colorScheme.onPrimaryContainer,
                 ),
               ),
             ),
@@ -565,23 +492,14 @@ class _AiAccountingScreenState extends State<AiAccountingScreen> {
             const SizedBox(height: 12),
           ],
           // 识别按钮
-          FilledButton.icon(
+          AppButton(
             onPressed: _recognizing ? null : _recognize,
-            icon: _recognizing
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.auto_awesome),
-            label: Text(_recognizing
+            loading: _recognizing,
+            icon: const Icon(Icons.auto_awesome),
+            label: _recognizing
                 ? '识别中... (${_base64Images.isNotEmpty ? "处理 ${_base64Images.length} 张图片" : "处理中"})'
-                : 'AI 识别'),
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(48),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
+                : 'AI 识别',
+            borderRadius: BorderRadius.circular(12),
           ),
           const SizedBox(height: 24),
           // 识别结果（多条）
@@ -600,7 +518,7 @@ class _AiAccountingScreenState extends State<AiAccountingScreen> {
                 padding: const EdgeInsets.only(top: 8),
                 child: SizedBox(
                   width: double.infinity,
-                  child: FilledButton.icon(
+                  child: AppButton(
                     // 手动保存前先检测重复，有重复时弹出确认对话框
                     onPressed: _saving
                         ? null
@@ -611,21 +529,12 @@ class _AiAccountingScreenState extends State<AiAccountingScreen> {
                               await _saveAllResults(autoMode: false);
                             }
                           },
-                    icon: _saving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.save),
-                    label: Text(_saving
+                    loading: _saving,
+                    icon: const Icon(Icons.save),
+                    label: _saving
                         ? '保存中...'
-                        : '全部保存（${_results.length} 条）'),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(48),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
+                        : '全部保存（${_results.length} 条）',
+                    borderRadius: BorderRadius.circular(12),
                   ),
                 ),
               ),
@@ -722,7 +631,7 @@ class _AiAccountingScreenState extends State<AiAccountingScreen> {
               ],
             ),
             const Divider(height: 20),
-            _resultRow('金额', '¥${result.amount.toStringAsFixed(2)}'),
+            _resultRow('金额', formatMoney(result.amount, '¥')),
             _resultRow('类型', result.type == 'income' ? '收入' : '支出'),
             _resultRow('分类', result.category),
             if (result.note != null && result.note!.isNotEmpty)

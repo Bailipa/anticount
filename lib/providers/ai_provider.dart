@@ -18,13 +18,11 @@ class AiProvider extends ChangeNotifier {
   // 当前选中的模型 ID（覆盖 Profile 默认）。为 null 时使用 Profile 默认模型。
   String? _activeTextModelId;
   String? _activeMultimodalModelId;
-  bool _initialized = false;
 
   /// 对话模式历史消息
   final List<AiChatMessage> _chatHistory = [];
 
   List<AiProfile> get profiles => _profiles;
-  bool get initialized => _initialized;
 
   /// 当前对话历史（不可变副本）
   List<AiChatMessage> get chatHistory => List.unmodifiable(_chatHistory);
@@ -48,9 +46,6 @@ class AiProvider extends ChangeNotifier {
       orElse: () => _profiles.first,
     );
   }
-
-  /// 兼容旧代码：返回文字识别配置
-  AiProfile? get activeProfile => activeTextProfile;
 
   /// 文字识别当前选中的模型 ID（若为 null，则使用 Profile 默认）
   String? get activeTextModelId => _activeTextModelId;
@@ -98,7 +93,6 @@ class AiProvider extends ChangeNotifier {
     _activeMultimodalProfileId = await _service.getActiveMultimodalProfileId();
     _activeTextModelId = await _service.getActiveTextModelId();
     _activeMultimodalModelId = await _service.getActiveMultimodalModelId();
-    _initialized = true;
     notifyListeners();
   }
 

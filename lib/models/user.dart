@@ -50,20 +50,4 @@ class AppUser {
       'created_at': createdAt?.millisecondsSinceEpoch,
     };
   }
-
-  AppUser copyWith({
-    String? nickname,
-    String? avatar,
-    String? email,
-  }) {
-    return AppUser(
-      id: id,
-      username: username,
-      passwordHash: passwordHash,
-      email: email ?? this.email,
-      nickname: nickname ?? this.nickname,
-      avatar: avatar ?? this.avatar,
-      createdAt: createdAt,
-    );
-  }
 }

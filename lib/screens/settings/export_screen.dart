@@ -6,6 +6,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/export_service.dart';
 import '../../widgets/animated_dialog.dart';
+import '../../widgets/app_button.dart';
 
 /// 账单导出页面
 ///
@@ -162,21 +163,12 @@ class _ExportScreenState extends State<ExportScreen> {
           ),
           const SizedBox(height: 24),
           // 导出按钮
-          FilledButton.icon(
+          AppButton(
             onPressed: _exporting ? null : _export,
-            icon: _exporting
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.file_upload_outlined),
-            label: Text(_exporting ? '导出中...' : '导出 CSV'),
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(48),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
+            loading: _exporting,
+            icon: const Icon(Icons.file_upload_outlined),
+            label: _exporting ? '导出中...' : '导出 CSV',
+            borderRadius: BorderRadius.circular(12),
           ),
         ],
       ),
