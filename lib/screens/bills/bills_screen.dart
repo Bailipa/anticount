@@ -54,10 +54,29 @@ class _BillsScreenState extends State<BillsScreen> {
 
   bool _loading = true;
 
+  /// 交易数据 Provider 引用（用于监听数据变更后实时刷新）
+  TransactionProvider? _txProvider;
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadData());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _txProvider = context.read<TransactionProvider>();
+      _txProvider?.addListener(_onDataChanged);
+      _loadData();
+    });
+  }
+
+  @override
+  void dispose() {
+    _txProvider?.removeListener(_onDataChanged);
+    super.dispose();
+  }
+
+  /// 数据变更（新增/编辑/删除/导入）后实时刷新，无需手动下拉
+  void _onDataChanged() {
+    if (!mounted) return;
+    _loadData(showLoading: false);
   }
 
   /// 计算时间切换时的滑动方向

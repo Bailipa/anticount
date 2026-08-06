@@ -260,6 +260,9 @@ class SettingsScreen extends StatelessWidget {
     );
     if (ok == true) {
       await authProvider.logout(retainData: retain);
+      // await 之后 context 可能已失效，先判断再弹回根路由
+      if (!context.mounted) return;
+      Navigator.of(context).popUntil((route) => route.isFirst);
     }
   }
 

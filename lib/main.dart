@@ -82,7 +82,14 @@ class AnticountApp extends StatelessWidget {
             create: (_) => importService,
           ),
           ChangeNotifierProvider(
-            create: (_) => AiProvider(aiService)..bootstrap(),
+            create: (context) {
+              final auth = context.read<AuthProvider>();
+              final ai = AiProvider(aiService);
+              // 登录用户变化时按用户加载/清空 AI 配置
+              auth.addListener(() => ai.loadForUser(auth.user?.id));
+              ai.loadForUser(auth.user?.id);
+              return ai;
+            },
           ),
       ],
       child: Consumer<SettingsProvider>(

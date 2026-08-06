@@ -360,13 +360,18 @@ class AiChatResponse {
 ///
 /// 管理多个 AI 配置（Profile），调用大模型 API 进行记账识别。
 /// 支持为文字识别和图像识别分别选择 Profile 和具体模型 ID。
+/// 所有 Profile 相关存储均按 userId 隔离，避免多账号之间互相看到对方的 AI 配置。
 class AiService {
+  // Profile 存储 key 均为全局前缀，实际使用时拼接 userId 组成用户维度 key
   static const _kProfiles = 'ai_profiles';
   static const _kActiveTextProfileId = 'ai_active_text_profile_id';
   static const _kActiveMultimodalProfileId = 'ai_active_multimodal_profile_id';
   // 用户可在同一 Profile 下切换具体模型 ID（覆盖 profile.textConfig/multimodalConfig.modelId）
   static const _kActiveTextModelId = 'ai_active_text_model_id';
   static const _kActiveMultimodalModelId = 'ai_active_multimodal_model_id';
+
+  /// 拼接用户维度的存储 key，如 ai_profiles_1
+  String _userKey(String baseKey, int userId) => '${baseKey}_$userId';
 
   SharedPreferences? _prefs;
 
@@ -375,10 +380,10 @@ class AiService {
     return _prefs!;
   }
 
-  /// 获取所有配置
-  Future<List<AiProfile>> getProfiles() async {
+  /// 获取指定用户的所有配置
+  Future<List<AiProfile>> getProfiles(int userId) async {
     final prefs = await _getPrefs();
-    final raw = prefs.getString(_kProfiles);
+    final raw = prefs.getString(_userKey(_kProfiles, userId));
     if (raw == null) return const [];
     try {
       final list = jsonDecode(raw) as List;
@@ -390,109 +395,113 @@ class AiService {
     }
   }
 
-  Future<void> _saveProfiles(List<AiProfile> profiles) async {
+  Future<void> _saveProfiles(int userId, List<AiProfile> profiles) async {
     final prefs = await _getPrefs();
     final raw = jsonEncode(profiles.map((p) => p.toMap()).toList());
-    await prefs.setString(_kProfiles, raw);
+    await prefs.setString(_userKey(_kProfiles, userId), raw);
   }
 
   /// 添加配置
-  Future<void> addProfile(AiProfile profile) async {
+  Future<void> addProfile(int userId, AiProfile profile) async {
     // getProfiles 可能返回 const []（不可修改），需创建可修改副本
-    final profiles = List<AiProfile>.from(await getProfiles());
+    final profiles = List<AiProfile>.from(await getProfiles(userId));
     profiles.add(profile);
-    await _saveProfiles(profiles);
+    await _saveProfiles(userId, profiles);
   }
 
   /// 更新配置
-  Future<void> updateProfile(AiProfile profile) async {
-    final profiles = List<AiProfile>.from(await getProfiles());
+  Future<void> updateProfile(int userId, AiProfile profile) async {
+    final profiles = List<AiProfile>.from(await getProfiles(userId));
     final idx = profiles.indexWhere((p) => p.id == profile.id);
     if (idx >= 0) {
       profiles[idx] = profile;
-      await _saveProfiles(profiles);
+      await _saveProfiles(userId, profiles);
     }
   }
 
   /// 删除配置
-  Future<void> removeProfile(String id) async {
-    final profiles = List<AiProfile>.from(await getProfiles());
+  Future<void> removeProfile(int userId, String id) async {
+    final profiles = List<AiProfile>.from(await getProfiles(userId));
     profiles.removeWhere((p) => p.id == id);
-    await _saveProfiles(profiles);
+    await _saveProfiles(userId, profiles);
     // 如果删除的是当前激活的，清除激活状态（并切到第一个可用配置）
-    final activeTextId = await getActiveTextProfileId();
+    final activeTextId = await getActiveTextProfileId(userId);
     if (activeTextId == id) {
       final newId = profiles.isEmpty ? null : profiles.first.id;
-      await setActiveTextProfileId(newId);
+      await setActiveTextProfileId(userId, newId);
       // 切换 Profile 时清除模型 ID 覆盖，让调用方回退到 Profile 默认模型
-      await setActiveTextModelId(null);
+      await setActiveTextModelId(userId, null);
     }
-    final activeMmId = await getActiveMultimodalProfileId();
+    final activeMmId = await getActiveMultimodalProfileId(userId);
     if (activeMmId == id) {
       final newId = profiles.isEmpty ? null : profiles.first.id;
-      await setActiveMultimodalProfileId(newId);
-      await setActiveMultimodalModelId(null);
+      await setActiveMultimodalProfileId(userId, newId);
+      await setActiveMultimodalModelId(userId, null);
     }
   }
 
-  /// 获取文字识别激活的配置 ID
-  Future<String?> getActiveTextProfileId() async {
+  /// 获取指定用户文字识别激活的配置 ID
+  Future<String?> getActiveTextProfileId(int userId) async {
     final prefs = await _getPrefs();
-    return prefs.getString(_kActiveTextProfileId);
+    return prefs.getString(_userKey(_kActiveTextProfileId, userId));
   }
 
-  Future<void> setActiveTextProfileId(String? id) async {
+  Future<void> setActiveTextProfileId(int userId, String? id) async {
     final prefs = await _getPrefs();
+    final key = _userKey(_kActiveTextProfileId, userId);
     if (id == null) {
-      await prefs.remove(_kActiveTextProfileId);
+      await prefs.remove(key);
     } else {
-      await prefs.setString(_kActiveTextProfileId, id);
+      await prefs.setString(key, id);
     }
   }
 
-  /// 获取图像识别激活的配置 ID
-  Future<String?> getActiveMultimodalProfileId() async {
+  /// 获取指定用户图像识别激活的配置 ID
+  Future<String?> getActiveMultimodalProfileId(int userId) async {
     final prefs = await _getPrefs();
-    return prefs.getString(_kActiveMultimodalProfileId);
+    return prefs.getString(_userKey(_kActiveMultimodalProfileId, userId));
   }
 
-  Future<void> setActiveMultimodalProfileId(String? id) async {
+  Future<void> setActiveMultimodalProfileId(int userId, String? id) async {
     final prefs = await _getPrefs();
+    final key = _userKey(_kActiveMultimodalProfileId, userId);
     if (id == null) {
-      await prefs.remove(_kActiveMultimodalProfileId);
+      await prefs.remove(key);
     } else {
-      await prefs.setString(_kActiveMultimodalProfileId, id);
+      await prefs.setString(key, id);
     }
   }
 
-  /// 获取文字识别当前选中的模型 ID（覆盖 Profile 默认）
+  /// 获取指定用户文字识别当前选中的模型 ID（覆盖 Profile 默认）
   /// 若未设置，返回 null，调用方应回退到 Profile.textConfig.modelId
-  Future<String?> getActiveTextModelId() async {
+  Future<String?> getActiveTextModelId(int userId) async {
     final prefs = await _getPrefs();
-    return prefs.getString(_kActiveTextModelId);
+    return prefs.getString(_userKey(_kActiveTextModelId, userId));
   }
 
-  Future<void> setActiveTextModelId(String? id) async {
+  Future<void> setActiveTextModelId(int userId, String? id) async {
     final prefs = await _getPrefs();
+    final key = _userKey(_kActiveTextModelId, userId);
     if (id == null || id.isEmpty) {
-      await prefs.remove(_kActiveTextModelId);
+      await prefs.remove(key);
     } else {
-      await prefs.setString(_kActiveTextModelId, id);
+      await prefs.setString(key, id);
     }
   }
 
-  /// 获取图像识别当前选中的模型 ID（覆盖 Profile 默认）
-  Future<String?> getActiveMultimodalModelId() async {
+  /// 获取指定用户图像识别当前选中的模型 ID（覆盖 Profile 默认）
+  Future<String?> getActiveMultimodalModelId(int userId) async {
     final prefs = await _getPrefs();
-    return prefs.getString(_kActiveMultimodalModelId);
+    return prefs.getString(_userKey(_kActiveMultimodalModelId, userId));
   }
 
-  Future<void> setActiveMultimodalModelId(String? id) async {
+  Future<void> setActiveMultimodalModelId(int userId, String? id) async {
     final prefs = await _getPrefs();
+    final key = _userKey(_kActiveMultimodalModelId, userId);
     if (id == null || id.isEmpty) {
-      await prefs.remove(_kActiveMultimodalModelId);
+      await prefs.remove(key);
     } else {
-      await prefs.setString(_kActiveMultimodalModelId, id);
+      await prefs.setString(key, id);
     }
   }
 

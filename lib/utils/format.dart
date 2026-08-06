@@ -14,5 +14,6 @@ String formatMoney(
   String? sign,
   String? prefix,
 }) {
-  return '$prefix$sign$currency${amount.toStringAsFixed(2)}';
+  // 可选参数为 null 时用空字符串，避免拼接出字面量 "null"
+  return '${prefix ?? ''}${sign ?? ''}$currency${amount.toStringAsFixed(2)}';
 }

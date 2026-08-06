@@ -107,6 +107,10 @@ class UserProfileScreen extends StatelessWidget {
       );
       if (ok == true) {
         await authProvider.logout(retainData: retain);
+        // await 之后 context 可能已失效，先判断再弹回根路由
+        if (context.mounted) {
+          Navigator.of(context).popUntil((route) => route.isFirst);
+        }
       }
     } else if (value == 'version') {
       await showInfoDialog(

@@ -56,3 +56,7 @@ log/
 tmp/
 .trae/
 
+
+# 测试与 AI 实验功能（本地保留，不入库）
+test/
+lib/utils/recent_transactions_context.dart

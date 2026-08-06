@@ -12,6 +12,9 @@ class AiProvider extends ChangeNotifier {
 
   final AiService _service;
 
+  // 当前登录用户 ID；为 null 时表示未登录，相关操作直接忽略
+  int? _userId;
+
   List<AiProfile> _profiles = const [];
   String? _activeTextProfileId;
   String? _activeMultimodalProfileId;
@@ -86,32 +89,47 @@ class AiProvider extends ChangeNotifier {
       effectiveMultimodalConfig!.vendor.supportsMultimodal &&
       effectiveMultimodalConfig!.isValid;
 
-  /// 启动时加载配置
-  Future<void> bootstrap() async {
-    _profiles = await _service.getProfiles();
-    _activeTextProfileId = await _service.getActiveTextProfileId();
-    _activeMultimodalProfileId = await _service.getActiveMultimodalProfileId();
-    _activeTextModelId = await _service.getActiveTextModelId();
-    _activeMultimodalModelId = await _service.getActiveMultimodalModelId();
+  /// 跟随登录用户切换，加载该用户的 AI 配置；userId 为 null 时清空
+  Future<void> loadForUser(int? userId) async {
+    _userId = userId;
+    _chatHistory.clear();
+    if (userId == null) {
+      _profiles = const [];
+      _activeTextProfileId = null;
+      _activeMultimodalProfileId = null;
+      _activeTextModelId = null;
+      _activeMultimodalModelId = null;
+      notifyListeners();
+      return;
+    }
+    _profiles = await _service.getProfiles(userId);
+    _activeTextProfileId = await _service.getActiveTextProfileId(userId);
+    _activeMultimodalProfileId =
+        await _service.getActiveMultimodalProfileId(userId);
+    _activeTextModelId = await _service.getActiveTextModelId(userId);
+    _activeMultimodalModelId =
+        await _service.getActiveMultimodalModelId(userId);
     notifyListeners();
   }
 
   /// 添加配置
   Future<void> addProfile(AiProfile profile) async {
-    await _service.addProfile(profile);
-    _profiles = await _service.getProfiles();
+    final uid = _userId;
+    if (uid == null) return;
+    await _service.addProfile(uid, profile);
+    _profiles = await _service.getProfiles(uid);
     // 如果是第一个配置，自动激活文字识别
     if (_profiles.length == 1) {
       _activeTextProfileId = profile.id;
       _activeTextModelId = profile.textConfig?.modelId;
-      await _service.setActiveTextProfileId(profile.id);
-      await _service.setActiveTextModelId(_activeTextModelId);
+      await _service.setActiveTextProfileId(uid, profile.id);
+      await _service.setActiveTextModelId(uid, _activeTextModelId);
       // 如果该配置有多模态，也自动激活图像识别
       if (profile.hasMultimodalModel) {
         _activeMultimodalProfileId = profile.id;
         _activeMultimodalModelId = profile.multimodalConfig?.modelId;
-        await _service.setActiveMultimodalProfileId(profile.id);
-        await _service.setActiveMultimodalModelId(_activeMultimodalModelId);
+        await _service.setActiveMultimodalProfileId(uid, profile.id);
+        await _service.setActiveMultimodalModelId(uid, _activeMultimodalModelId);
       }
     }
     notifyListeners();
@@ -119,8 +137,10 @@ class AiProvider extends ChangeNotifier {
 
   /// 更新配置
   Future<void> updateProfile(AiProfile profile) async {
-    await _service.updateProfile(profile);
-    _profiles = await _service.getProfiles();
+    final uid = _userId;
+    if (uid == null) return;
+    await _service.updateProfile(uid, profile);
+    _profiles = await _service.getProfiles(uid);
     // 如果当前激活的 Profile 被更新，同步刷新模型 ID（防止旧 modelId 失效）
     if (_activeTextProfileId == profile.id) {
       final newModelId = profile.textConfig?.modelId;
@@ -130,7 +150,7 @@ class AiProvider extends ChangeNotifier {
               !profile.textConfig!.vendor.allModelIds
                   .contains(_activeTextModelId))) {
         _activeTextModelId = newModelId;
-        await _service.setActiveTextModelId(newModelId);
+        await _service.setActiveTextModelId(uid, newModelId);
       }
     }
     if (_activeMultimodalProfileId == profile.id) {
@@ -140,7 +160,7 @@ class AiProvider extends ChangeNotifier {
               !profile.multimodalConfig!.vendor.multimodalModelIds
                   .contains(_activeMultimodalModelId))) {
         _activeMultimodalModelId = newModelId;
-        await _service.setActiveMultimodalModelId(newModelId);
+        await _service.setActiveMultimodalModelId(uid, newModelId);
       }
     }
     notifyListeners();
@@ -148,52 +168,62 @@ class AiProvider extends ChangeNotifier {
 
   /// 删除配置
   Future<void> removeProfile(String id) async {
-    await _service.removeProfile(id);
-    _profiles = await _service.getProfiles();
-    _activeTextProfileId = await _service.getActiveTextProfileId();
+    final uid = _userId;
+    if (uid == null) return;
+    await _service.removeProfile(uid, id);
+    _profiles = await _service.getProfiles(uid);
+    _activeTextProfileId = await _service.getActiveTextProfileId(uid);
     _activeMultimodalProfileId =
-        await _service.getActiveMultimodalProfileId();
-    _activeTextModelId = await _service.getActiveTextModelId();
-    _activeMultimodalModelId = await _service.getActiveMultimodalModelId();
+        await _service.getActiveMultimodalProfileId(uid);
+    _activeTextModelId = await _service.getActiveTextModelId(uid);
+    _activeMultimodalModelId = await _service.getActiveMultimodalModelId(uid);
     notifyListeners();
   }
 
   /// 切换文字识别 Profile（同时重置模型 ID 为 Profile 默认）
   Future<void> setActiveTextProfile(String id) async {
-    await _service.setActiveTextProfileId(id);
+    final uid = _userId;
+    if (uid == null) return;
+    await _service.setActiveTextProfileId(uid, id);
     _activeTextProfileId = id;
     // 重置模型 ID 为 Profile 默认
     final profile =
         _profiles.firstWhere((p) => p.id == id, orElse: () => _profiles.first);
     final defaultModelId = profile.textConfig?.modelId;
     _activeTextModelId = defaultModelId;
-    await _service.setActiveTextModelId(defaultModelId);
+    await _service.setActiveTextModelId(uid, defaultModelId);
     notifyListeners();
   }
 
   /// 切换图像识别 Profile（同时重置模型 ID 为 Profile 默认）
   Future<void> setActiveMultimodalProfile(String id) async {
-    await _service.setActiveMultimodalProfileId(id);
+    final uid = _userId;
+    if (uid == null) return;
+    await _service.setActiveMultimodalProfileId(uid, id);
     _activeMultimodalProfileId = id;
     final profile =
         _profiles.firstWhere((p) => p.id == id, orElse: () => _profiles.first);
     final defaultModelId = profile.multimodalConfig?.modelId;
     _activeMultimodalModelId = defaultModelId;
-    await _service.setActiveMultimodalModelId(defaultModelId);
+    await _service.setActiveMultimodalModelId(uid, defaultModelId);
     notifyListeners();
   }
 
   /// 切换文字识别的具体模型 ID（保持当前 Profile，仅覆盖 modelId）
   Future<void> setActiveTextModel(String modelId) async {
+    final uid = _userId;
+    if (uid == null) return;
     _activeTextModelId = modelId;
-    await _service.setActiveTextModelId(modelId);
+    await _service.setActiveTextModelId(uid, modelId);
     notifyListeners();
   }
 
   /// 切换图像识别的具体模型 ID（保持当前 Profile，仅覆盖 modelId）
   Future<void> setActiveMultimodalModel(String modelId) async {
+    final uid = _userId;
+    if (uid == null) return;
     _activeMultimodalModelId = modelId;
-    await _service.setActiveMultimodalModelId(modelId);
+    await _service.setActiveMultimodalModelId(uid, modelId);
     notifyListeners();
   }
 

@@ -46,7 +46,10 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
           behavior: SnackBarBehavior.floating,
         ),
       );
-      // 登出后根路由会自动切回登录页
+      // 删除成功后弹回根路由，避免 push 出的页面盖住登录页
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
     } else {
       await showInfoDialog(
         context: context,
