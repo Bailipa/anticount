@@ -12,6 +12,7 @@ import '../../utils/ai_result_saver.dart';
 import '../../utils/duplicate_check.dart';
 import '../../utils/format.dart';
 import '../../utils/image_picker_helper.dart';
+import '../../utils/recent_transactions_context.dart';
 import '../../widgets/animated_dialog.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/tag_badge.dart';
@@ -136,6 +137,16 @@ class _AiAccountingScreenState extends State<AiAccountingScreen> {
       final incomeCats = settings.incomeCategories;
       final textHint = hasText ? _textCtrl.text.trim() : null;
 
+      // 历史账单参考：让 AI 识别时能参考已记录的账单（保持分类一致、判断重复）
+      final user = context.read<AuthProvider>().user;
+      final historyContext = user == null
+          ? null
+          : await buildRecentTransactionsContext(
+              userId: user.id,
+              provider: context.read<TransactionProvider>(),
+              currency: settings.currency,
+            );
+
       final List<AiRecognitionResult> results = [];
 
       if (useImage) {
@@ -146,6 +157,7 @@ class _AiAccountingScreenState extends State<AiAccountingScreen> {
             textHint: textHint,
             expenseCategories: expenseCats,
             incomeCategories: incomeCats,
+            historyContext: historyContext,
           );
           results.add(result);
         }
@@ -155,6 +167,7 @@ class _AiAccountingScreenState extends State<AiAccountingScreen> {
           text: _textCtrl.text.trim(),
           expenseCategories: expenseCats,
           incomeCategories: incomeCats,
+          historyContext: historyContext,
         );
         results.add(result);
       }

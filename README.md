@@ -18,6 +18,7 @@
 - 双模式识别：文字识别 + 图像识别（多模态）
 - 自动保存：识别后可自动保存（带确认弹窗）
 - API Key 验证：保存前自动验证 API Key 有效性
+- 历史账单参考：识别/对话时参考已记录账单，保持分类一致、辅助判断重复
 
 ### 用户系统
 - 注册/登录/重置密码
@@ -96,11 +97,22 @@ lib/
 │   ├── settings_service.dart    # 设置服务
 │   ├── transaction_service.dart # 交易服务
 │   └── widget_service.dart      # 桌面卡片数据服务
+├── utils/
+│   ├── date_helpers.dart        # 日期助手（周首/月初/月末）
+│   ├── format.dart              # 金额格式化
+│   ├── duplicate_check.dart     # 重复账单检测
+│   ├── image_picker_helper.dart # 图片多选 + base64
+│   ├── ai_result_saver.dart     # AI 结果保存
+│   └── recent_transactions_context.dart # AI 历史账单上下文
 └── widgets/
-    ├── animated_dialog.dart     # 动画对话框
+    ├── animated_dialog.dart     # 动画/确认/输入对话框
     ├── app_button.dart          # 通用按钮
     ├── app_text_field.dart      # 通用输入框
-    └── slide_transition_switcher.dart # 滑动切换动画
+    ├── slide_transition_switcher.dart # 滑动切换动画
+    ├── period_switcher.dart     # 周期切换器（月/周）
+    ├── overlay_dropdown.dart    # 通用浮层下拉
+    ├── empty_state.dart         # 空状态占位
+    └── tag_badge.dart           # 标签徽章
 ```
 
 ## 开发环境
@@ -155,6 +167,9 @@ flutter analyze
 
 ## 版本历史
 
+- v1.5.0 - AI 记账参考历史账单（识别/对话时参考已记录账单）
+- v1.4.4 - 修复金额排版、记账实时刷新、AI 配置按用户隔离、退出登录跳转
+- v1.4.3 - 死代码清理 + 通用组件复用 + AI 服务收敛
 - v1.4.2 - 修复月份/周切换动画方向并抽象为 _PeriodSwitcher 组件
 - v1.4.1 - 统计页柱状图左右滑动切换 + 月份切换动画抽象
 - v1.4.0 - 账单导入（CSV/Excel + AI 解析）

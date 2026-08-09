@@ -252,6 +252,7 @@ class AiProvider extends ChangeNotifier {
     required String text,
     required List<String> expenseCategories,
     required List<String> incomeCategories,
+    String? historyContext,
   }) async {
     final config = effectiveTextConfig;
     if (config == null || !config.isValid) {
@@ -262,6 +263,7 @@ class AiProvider extends ChangeNotifier {
       text: text,
       expenseCategories: expenseCategories,
       incomeCategories: incomeCategories,
+      historyContext: historyContext,
     );
   }
 
@@ -271,6 +273,7 @@ class AiProvider extends ChangeNotifier {
     String? textHint,
     required List<String> expenseCategories,
     required List<String> incomeCategories,
+    String? historyContext,
   }) async {
     final config = effectiveMultimodalConfig;
     if (config == null || !config.isValid) {
@@ -282,6 +285,7 @@ class AiProvider extends ChangeNotifier {
       textHint: textHint,
       expenseCategories: expenseCategories,
       incomeCategories: incomeCategories,
+      historyContext: historyContext,
     );
   }
 
@@ -294,6 +298,7 @@ class AiProvider extends ChangeNotifier {
     required List<String> base64Images,
     required List<String> expenseCategories,
     required List<String> incomeCategories,
+    String? historyContext,
   }) async {
     final hasImage = base64Images.isNotEmpty;
     final config = hasImage ? effectiveMultimodalConfig : effectiveTextConfig;
@@ -319,6 +324,7 @@ class AiProvider extends ChangeNotifier {
       userMessage: userMessage,
       expenseCategories: expenseCategories,
       incomeCategories: incomeCategories,
+      historyContext: historyContext,
     );
 
     // AI 响应后再追加助手消息

@@ -718,6 +718,7 @@ class AiService {
     required String text,
     required List<String> expenseCategories,
     required List<String> incomeCategories,
+    String? historyContext,
   }) async {
     if (config.apiKey.isEmpty) {
       throw const AiException('未配置文本识别');
@@ -726,7 +727,8 @@ class AiService {
       throw const AiException('未配置文本识别模型');
     }
 
-    final prompt = _buildPrompt(expenseCategories, incomeCategories);
+    final prompt =
+        _buildPrompt(expenseCategories, incomeCategories, historyContext: historyContext);
     final url = _buildEndpoint(config.vendor);
     final isAnthropic = config.vendor.apiFormat == AiApiFormat.anthropic;
     // DeepSeek 支持 response_format JSON Output
@@ -775,6 +777,7 @@ class AiService {
     String? textHint,
     required List<String> expenseCategories,
     required List<String> incomeCategories,
+    String? historyContext,
   }) async {
     if (config.apiKey.isEmpty) {
       throw const AiException('未配置多模态识别');
@@ -786,7 +789,8 @@ class AiService {
       throw const AiException('多模态识别厂商不支持图片输入');
     }
 
-    final prompt = _buildPrompt(expenseCategories, incomeCategories);
+    final prompt =
+        _buildPrompt(expenseCategories, incomeCategories, historyContext: historyContext);
     final url = _buildEndpoint(config.vendor);
     final isAnthropic = config.vendor.apiFormat == AiApiFormat.anthropic;
 
@@ -852,6 +856,7 @@ class AiService {
     required AiChatMessage userMessage,
     required List<String> expenseCategories,
     required List<String> incomeCategories,
+    String? historyContext,
   }) async {
     if (config.apiKey.isEmpty) {
       throw const AiException('未配置 AI 对话');
@@ -860,7 +865,8 @@ class AiService {
       throw const AiException('未配置 AI 对话模型');
     }
 
-    final prompt = _buildChatPrompt(expenseCategories, incomeCategories);
+    final prompt = _buildChatPrompt(expenseCategories, incomeCategories,
+        historyContext: historyContext);
     final url = _buildEndpoint(config.vendor);
     final isAnthropic = config.vendor.apiFormat == AiApiFormat.anthropic;
 
@@ -1033,9 +1039,10 @@ class AiService {
 
   String _buildChatPrompt(
     List<String> expenseCategories,
-    List<String> incomeCategories,
-  ) {
-    return '''你是 Anticount 的记账助手，正在与用户进行多轮对话。
+    List<String> incomeCategories, {
+    String? historyContext,
+  }) {
+    final base = '''你是 Anticount 的记账助手，正在与用户进行多轮对话。
 
 任务：
 1. 如果用户提供的信息足够记账，请返回账单 JSON，并可用自然语言简要确认。
@@ -1066,13 +1073,15 @@ class AiService {
 规则：
 1. 追问时只返回自然语言，不要返回 JSON。
 2. 返回账单时也可以附带简短自然语言说明。''';
+    return historyContext == null ? base : '$base\n\n$historyContext';
   }
 
   String _buildPrompt(
     List<String> expenseCategories,
-    List<String> incomeCategories,
-  ) {
-    return '''你是一个记账助手。请根据用户输入识别记账信息，并以 JSON 格式返回结果。
+    List<String> incomeCategories, {
+    String? historyContext,
+  }) {
+    final base = '''你是一个记账助手。请根据用户输入识别记账信息，并以 JSON 格式返回结果。
 
 返回格式（严格 JSON，禁止任何额外文字、解释或 markdown 代码块）：
 {
@@ -1096,6 +1105,7 @@ class AiService {
 2. 如无法确定分类，使用"其他"（如分类列表中存在）
 3. amount 必须为正数；如输入为"收入 100"则 type=income，amount=100
 4. 仅返回 JSON 对象，不要包裹在 markdown 代码块中''';
+    return historyContext == null ? base : '$base\n\n$historyContext';
   }
 
   /// 校验字段并构建识别结果（amount>0、type、category 白名单）

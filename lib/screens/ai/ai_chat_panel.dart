@@ -13,6 +13,7 @@ import '../../services/ai_service.dart';
 import '../../utils/ai_result_saver.dart';
 import '../../utils/duplicate_check.dart';
 import '../../utils/image_picker_helper.dart';
+import '../../utils/recent_transactions_context.dart';
 import '../../widgets/animated_dialog.dart';
 import '../../widgets/empty_state.dart';
 import 'ai_error_dialog.dart';
@@ -95,11 +96,22 @@ class _AiChatPanelState extends State<AiChatPanel> {
     });
 
     try {
+      // 历史账单参考：让 AI 对话时能参考已记录的账单（保持分类一致、判断重复）
+      final user = context.read<AuthProvider>().user;
+      final historyContext = user == null
+          ? null
+          : await buildRecentTransactionsContext(
+              userId: user.id,
+              provider: context.read<TransactionProvider>(),
+              currency: settings.currency,
+            );
+
       final response = await ai.sendChatMessage(
         text: text,
         base64Images: pendingImages,
         expenseCategories: settings.expenseCategories,
         incomeCategories: settings.incomeCategories,
+        historyContext: historyContext,
       );
       _scrollToBottom();
 

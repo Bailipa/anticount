@@ -12,7 +12,7 @@ class AppInfo {
   /// x：大版本号（需用户确认）
   /// y：次版本号（新增功能时增加）
   /// z：修订版本号（修复 bug 或完善功能时增加）
-  static const String version = '1.4.4';
+  static const String version = '1.5.0';
 
   /// 版权信息
   static const String copyright = '© 2026 Anticraft';
