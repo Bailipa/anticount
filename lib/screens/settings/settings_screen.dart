@@ -7,8 +7,6 @@ import '../../providers/settings_provider.dart';
 import '../../services/widget_service.dart';
 import '../../widgets/animated_dialog.dart';
 import 'category_management_screen.dart';
-import 'change_password_screen.dart';
-import 'delete_account_screen.dart';
 import 'export_screen.dart';
 import 'import_screen.dart';
 
@@ -168,38 +166,6 @@ class SettingsScreen extends StatelessWidget {
               ),
             ],
           ),
-          _SectionTitle('账户安全'),
-          _SettingsCard(
-            children: [
-              SwitchListTile(
-                secondary: const Icon(Icons.save_outlined),
-                title: const Text('退出登录时保留数据'),
-                subtitle: const Text('关闭后，退出登录将清除本地记账数据'),
-                value: settings.retainDataOnLogout,
-                onChanged: (v) => settings.setRetainDataOnLogout(v),
-              ),
-              const Divider(height: 1, indent: 16, endIndent: 16),
-              ListTile(
-                leading: const Icon(Icons.lock_outline),
-                title: const Text('修改密码'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => const ChangePasswordScreen(),
-                )),
-              ),
-              const Divider(height: 1, indent: 16, endIndent: 16),
-              ListTile(
-                leading: Icon(Icons.delete_forever,
-                    color: Theme.of(context).colorScheme.error),
-                title: Text('删除账号',
-                    style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => const DeleteAccountScreen(),
-                )),
-              ),
-            ],
-          ),
           _SectionTitle('关于'),
           _SettingsCard(
             children: [
@@ -222,48 +188,10 @@ class SettingsScreen extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          // 退出登录按钮
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: FilledButton.tonalIcon(
-              onPressed: () => _confirmLogout(context),
-              icon: const Icon(Icons.logout),
-              label: const Text('退出登录'),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-          ),
           const SizedBox(height: 32),
         ],
       ),
     );
-  }
-
-  /// 退出登录确认
-  Future<void> _confirmLogout(BuildContext context) async {
-    final authProvider = context.read<AuthProvider>();
-    final settings = context.read<SettingsProvider>();
-    final retain = settings.retainDataOnLogout;
-    final ok = await showConfirmDialog(
-      context: context,
-      title: '退出登录',
-      content: retain
-          ? '确认退出当前账号？\n你的记账数据将保留，下次登录可继续查看。'
-          : '确认退出当前账号？\n根据你的设置，退出后本地记账数据将被清除。',
-      confirmText: '退出',
-      cancelText: '取消',
-    );
-    if (ok == true) {
-      await authProvider.logout(retainData: retain);
-      // await 之后 context 可能已失效，先判断再弹回根路由
-      if (!context.mounted) return;
-      Navigator.of(context).popUntil((route) => route.isFirst);
-    }
   }
 
   /// 请求添加桌面卡片

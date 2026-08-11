@@ -64,6 +64,7 @@ class AiProvider extends ChangeNotifier {
       vendor: base.vendor,
       apiKey: base.apiKey,
       modelId: modelId,
+      baseUrl: base.baseUrl,
     );
   }
 
@@ -77,6 +78,7 @@ class AiProvider extends ChangeNotifier {
       vendor: base.vendor,
       apiKey: base.apiKey,
       modelId: modelId,
+      baseUrl: base.baseUrl,
     );
   }
 
@@ -144,9 +146,13 @@ class AiProvider extends ChangeNotifier {
     // 如果当前激活的 Profile 被更新，同步刷新模型 ID（防止旧 modelId 失效）
     if (_activeTextProfileId == profile.id) {
       final newModelId = profile.textConfig?.modelId;
+      // 自定义厂商无预设模型列表，不执行合法性检查，仅保留当前选择
+      final hasPresetModels =
+          profile.textConfig != null && profile.textConfig!.vendor.availableModels.isNotEmpty;
       // 若当前选中的模型 ID 不在新厂商的可用模型中，则重置为默认
       if (newModelId == null ||
-          (_activeTextModelId != null &&
+          (hasPresetModels &&
+              _activeTextModelId != null &&
               !profile.textConfig!.vendor.allModelIds
                   .contains(_activeTextModelId))) {
         _activeTextModelId = newModelId;

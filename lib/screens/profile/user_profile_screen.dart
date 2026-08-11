@@ -9,7 +9,6 @@ import 'package:provider/provider.dart';
 import '../../constants/app_info.dart';
 import '../../models/user.dart';
 import '../../providers/auth_provider.dart';
-import '../../providers/settings_provider.dart';
 import '../../widgets/animated_dialog.dart';
 import '../settings/settings_screen.dart';
 
@@ -30,20 +29,11 @@ class UserProfileScreen extends StatelessWidget {
             onSelected: (value) => _handleMenu(context, value),
             icon: const Icon(Icons.more_vert),
             itemBuilder: (context) => [
-              PopupMenuItem(
+              const PopupMenuItem(
                 value: 'version',
                 child: ListTile(
-                  leading: const Icon(Icons.info_outline),
+                  leading: Icon(Icons.info_outline),
                   title: Text('版本 v${AppInfo.version}'),
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'logout',
-                child: ListTile(
-                  leading: Icon(Icons.logout),
-                  title: Text('退出登录'),
                   contentPadding: EdgeInsets.zero,
                   dense: true,
                 ),
@@ -92,27 +82,7 @@ class UserProfileScreen extends StatelessWidget {
   }
 
   Future<void> _handleMenu(BuildContext context, String value) async {
-    if (value == 'logout') {
-      final authProvider = context.read<AuthProvider>();
-      final settings = context.read<SettingsProvider>();
-      final retain = settings.retainDataOnLogout;
-      final ok = await showConfirmDialog(
-        context: context,
-        title: '退出登录',
-        content: retain
-            ? '确认退出当前账号？\n你的记账数据将保留，下次登录可继续查看。'
-            : '确认退出当前账号？\n根据你的设置，退出后本地记账数据将被清除。',
-        confirmText: '退出',
-        cancelText: '取消',
-      );
-      if (ok == true) {
-        await authProvider.logout(retainData: retain);
-        // await 之后 context 可能已失效，先判断再弹回根路由
-        if (context.mounted) {
-          Navigator.of(context).popUntil((route) => route.isFirst);
-        }
-      }
-    } else if (value == 'version') {
+    if (value == 'version') {
       await showInfoDialog(
         context: context,
         title: '关于 ${AppInfo.name}',

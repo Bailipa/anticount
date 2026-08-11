@@ -9,7 +9,6 @@ import 'providers/ai_provider.dart';
 import 'providers/auth_provider.dart';
 import 'providers/settings_provider.dart';
 import 'providers/transaction_provider.dart';
-import 'screens/auth/login_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'services/ai_service.dart';
 import 'services/auth_service.dart';
@@ -221,7 +220,7 @@ class _RootGate extends StatelessWidget {
         ),
       );
     }
-    return auth.isAuthenticated ? const HomeScreen() : const LoginScreen();
+    return const HomeScreen();
   }
 }
 

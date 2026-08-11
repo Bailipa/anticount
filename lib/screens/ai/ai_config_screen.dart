@@ -220,6 +220,25 @@ class _ProfileModelGroup extends StatelessWidget {
         ? vendor.availableModels.where((m) => m.isMultimodal).toList()
         : vendor.availableModels;
 
+    // 自定义厂商无预设模型列表：将配置中保存的模型名作为唯一可选模型
+    final effectiveModels = models.isNotEmpty
+        ? models
+        : () {
+            final savedId = isMultimodal
+                ? profile.multimodalConfig?.modelId
+                : profile.textConfig?.modelId;
+            if (savedId == null || savedId.isEmpty) return const <AiModel>[];
+            return [
+              AiModel(
+                id: savedId,
+                type: isMultimodal
+                    ? AiModelType.multimodal
+                    : AiModelType.text,
+                description: '自定义模型',
+              ),
+            ];
+          }();
+
     // 当前是否选中此 Profile + 模型
     final isThisProfileActive = activeProfileId == profile.id;
     final activeModel = isThisProfileActive ? activeModelId : null;
@@ -257,7 +276,7 @@ class _ProfileModelGroup extends StatelessWidget {
             ),
           ),
           // 模型列表（自定义单选样式，避免 RadioListTile 弃用 API）
-          for (final model in models)
+          for (final model in effectiveModels)
             _ModelTile(
               modelId: model.id,
               description: model.description,

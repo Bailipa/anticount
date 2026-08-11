@@ -50,7 +50,8 @@ enum AiVendor {
   zhipu, // 质谱（智谱 GLM）
   openai, // OpenAI（ChatGPT）
   google, // 谷歌 Gemini
-  anthropic; // Anthropic（Claude）
+  anthropic, // Anthropic（Claude）
+  custom; // 自定义（OpenAI 兼容，Base URL 与模型由用户填写）
 
   /// 厂商显示名称
   String get label {
@@ -69,10 +70,12 @@ enum AiVendor {
         return 'Google Gemini';
       case AiVendor.anthropic:
         return 'Anthropic (Claude)';
+      case AiVendor.custom:
+        return '自定义（OpenAI 兼容）';
     }
   }
 
-  /// API 基础地址
+  /// API 基础地址（custom 无固定地址，实际地址存在 AiModelConfig.baseUrl）
   String get baseUrl {
     switch (this) {
       case AiVendor.kimi:
@@ -92,6 +95,8 @@ enum AiVendor {
         return 'https://generativelanguage.googleapis.com/v1beta/openai';
       case AiVendor.anthropic:
         return 'https://api.anthropic.com/v1';
+      case AiVendor.custom:
+        return '';
     }
   }
 
@@ -156,6 +161,9 @@ enum AiVendor {
           AiModel(id: 'claude-3-5-haiku-20241022', type: AiModelType.multimodal, description: '轻量多模态'),
           AiModel(id: 'claude-3-opus-20240229', type: AiModelType.multimodal, description: 'Opus 多模态'),
         ];
+      case AiVendor.custom:
+        // 自定义厂商：模型由用户填写，无预设列表
+        return const [];
     }
   }
 
@@ -187,6 +195,8 @@ enum AiVendor {
         return 'https://aistudio.google.com';
       case AiVendor.anthropic:
         return 'https://console.anthropic.com';
+      case AiVendor.custom:
+        return '';
     }
   }
 }
@@ -195,16 +205,32 @@ enum AiVendor {
 ///
 /// 文本识别和多模态识别各自独立配置，可使用不同厂商。
 /// 例如：文本用 DeepSeek，多模态用 Kimi。
+/// [baseUrl] 可选：自定义厂商（AiVendor.custom）时必填，用于覆盖厂商默认地址。
 class AiModelConfig {
   const AiModelConfig({
     required this.vendor,
     required this.apiKey,
     required this.modelId,
+    this.baseUrl,
   });
 
   final AiVendor vendor;
   final String apiKey;
   final String modelId;
+
+  /// 自定义 API 基础地址（覆盖 vendor.baseUrl）
+  final String? baseUrl;
+
+  /// 实际生效的 API 基础地址
+  String get effectiveBaseUrl =>
+      (baseUrl != null && baseUrl!.trim().isNotEmpty)
+          ? normalizeBaseUrl(baseUrl!)
+          : normalizeBaseUrl(vendor.baseUrl);
+
+  /// 实际生效的请求端点
+  String get endpoint => vendor.apiFormat == AiApiFormat.anthropic
+      ? '$effectiveBaseUrl/messages'
+      : '$effectiveBaseUrl/chat/completions';
 
   bool get isValid => apiKey.isNotEmpty && modelId.isNotEmpty;
 
@@ -212,6 +238,7 @@ class AiModelConfig {
         'vendor': vendor.name,
         'apiKey': apiKey,
         'modelId': modelId,
+        if (baseUrl != null && baseUrl!.trim().isNotEmpty) 'baseUrl': baseUrl,
       };
 
   factory AiModelConfig.fromMap(Map<String, dynamic> map) => AiModelConfig(
@@ -221,7 +248,19 @@ class AiModelConfig {
         ),
         apiKey: map['apiKey'] as String? ?? '',
         modelId: map['modelId'] as String? ?? '',
+        baseUrl: map['baseUrl'] as String?,
       );
+}
+
+/// 规范化 API 基础地址：去头尾空格、去末尾斜杠、去 /chat/completions 后缀
+String normalizeBaseUrl(String url) {
+  var raw = url.trim();
+  if (raw.isEmpty) return '';
+  raw = raw.replaceAll(RegExp(r'/+$'), '');
+  if (raw.endsWith('/chat/completions')) {
+    raw = raw.replaceAll(RegExp(r'/chat/completions$'), '');
+  }
+  return raw;
 }
 
 /// AI 配置（Profile）
@@ -521,12 +560,9 @@ class AiService {
   }
 
   /// 构建 API 端点 URL
-  String _buildEndpoint(AiVendor vendor) {
-    if (vendor.apiFormat == AiApiFormat.anthropic) {
-      return '${vendor.baseUrl}/messages';
-    }
-    return '${vendor.baseUrl}/chat/completions';
-  }
+  ///
+  /// 优先使用 [AiModelConfig.baseUrl]（自定义厂商），否则回退到厂商默认地址。
+  String _buildEndpoint(AiModelConfig config) => config.endpoint;
 
   /// 从响应中提取文本内容
   String _extractContent(AiVendor vendor, Map<String, dynamic> data) {
@@ -609,14 +645,16 @@ class AiService {
     throw const AiException('AI 识别失败');
   }
 
-  /// 验证 API Key 是否有效
+  /// 验证 API Key / 连通性
   ///
-  /// 发送一个最小化的测试请求，根据响应判断 API Key 是否正确。
+  /// 发送一个最小化的测试请求，根据响应判断 API 地址与 Key 是否正确。
+  /// [baseUrl] 可选：自定义厂商时传入用户填写的地址，否则使用厂商默认地址。
   /// 验证失败时抛出 [AiException]，包含具体错误信息和解决建议。
   Future<void> verifyApiKey({
     required AiVendor vendor,
     required String apiKey,
     required String modelId,
+    String? baseUrl,
   }) async {
     // 去除前后空格（用户粘贴时可能带入空白字符）
     final trimmedKey = apiKey.trim();
@@ -624,7 +662,14 @@ class AiService {
       throw const AiException('API Key 不能为空\n\n解决方法：请输入有效的 API Key');
     }
 
-    final url = _buildEndpoint(vendor);
+    final config = AiModelConfig(
+      vendor: vendor,
+      apiKey: trimmedKey,
+      modelId: modelId,
+      baseUrl: baseUrl,
+    );
+    final url = _buildEndpoint(config);
+    final base = config.effectiveBaseUrl;
     final body = <String, dynamic>{
       'model': modelId,
       'messages': [
@@ -647,13 +692,13 @@ class AiService {
           '· 模拟器/设备未联网或 DNS 解析慢\n\n'
           '解决方法：\n'
           '· 检查网络连接\n'
-          '· 确认设备能访问 ${vendor.baseUrl}');
+          '· 确认设备能访问 $base');
     } catch (e) {
       throw AiException(
           '网络请求失败：$e\n\n'
           '解决方法：\n'
           '· 检查网络连接\n'
-          '· 确认 API 地址 ${vendor.baseUrl} 可访问');
+          '· 确认 API 地址 $base 可访问');
     }
 
     if (response.statusCode == 401) {
@@ -729,7 +774,7 @@ class AiService {
 
     final prompt =
         _buildPrompt(expenseCategories, incomeCategories, historyContext: historyContext);
-    final url = _buildEndpoint(config.vendor);
+    final url = _buildEndpoint(config);
     final isAnthropic = config.vendor.apiFormat == AiApiFormat.anthropic;
     // DeepSeek 支持 response_format JSON Output
     final useJsonMode = config.vendor.jsonMode;
@@ -791,7 +836,7 @@ class AiService {
 
     final prompt =
         _buildPrompt(expenseCategories, incomeCategories, historyContext: historyContext);
-    final url = _buildEndpoint(config.vendor);
+    final url = _buildEndpoint(config);
     final isAnthropic = config.vendor.apiFormat == AiApiFormat.anthropic;
 
     return _recognizeWithRetry(
@@ -867,7 +912,7 @@ class AiService {
 
     final prompt = _buildChatPrompt(expenseCategories, incomeCategories,
         historyContext: historyContext);
-    final url = _buildEndpoint(config.vendor);
+    final url = _buildEndpoint(config);
     final isAnthropic = config.vendor.apiFormat == AiApiFormat.anthropic;
 
     // 构造消息列表：system 提示词 + 历史消息 + 当前用户消息
